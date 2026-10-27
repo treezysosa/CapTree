@@ -14,3 +14,5 @@ backend/models/
 *.onnx
 *.safetensors
 .env
+model-validation/
+app/src/androidTest/assets/validation/

@@ -30,6 +30,7 @@ jobs:
           curl --fail --location --retry 3 --max-time 300 https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -o model-validation/RealESRGAN_x4plus.pth
           python tools/export_realesrgan.py model-validation/RealESRGAN_x4plus.pth model-validation/realesrgan/realesrgan-x4.onnx
           python tools/validate_real_models.py realesrgan --model model-validation/realesrgan/realesrgan-x4.onnx --weights model-validation/RealESRGAN_x4plus.pth --output model-validation/realesrgan
+          curl --fail --location --retry 3 --max-time 60 https://raw.githubusercontent.com/xinntao/Real-ESRGAN/v0.3.0/LICENSE -o model-validation/realesrgan/Real-ESRGAN-LICENSE.txt
       - uses: actions/upload-artifact@v4
         with:
           name: verified-realesrgan-test-model
@@ -55,4 +56,37 @@ jobs:
         with:
           name: real-image-inference-validation
           path: model-validation/image/
+          retention-days: 14
+  android-realesrgan:
+    needs: realesrgan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-realesrgan-test-model
+          path: app/src/androidTest/assets/validation
+      - run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 2048
+          script: ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=studio.retro.ai.PretrainedModelTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-pretrained-model-verification
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           retention-days: 14
