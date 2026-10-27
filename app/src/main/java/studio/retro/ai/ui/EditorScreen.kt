@@ -55,7 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
             val clip=e.clips.getOrNull(e.selectedClip)
             if(e.tool=="clipper" && clip!=null) {
                 val valid=clip.endMs>clip.startMs && clip.startMs>=0
-                MediaPreview(clip.path,"video/mp4",seekPositionMs=e.previewRequestMs,rangeStartMs=if(valid)clip.startMs else 0,rangeEndMs=if(valid)clip.endMs else null,onPositionChanged=vm::previewPosition)
+                MediaPreview(clip.path,"video/mp4",seekPositionMs=e.previewRequestMs,rangeStartMs=if(valid)clip.startMs else 0,rangeEndMs=if(valid)clip.endMs else null,onPositionChanged={ position -> vm.previewPosition(clip.id,e.previewRequestMs,position) })
             } else MediaPreview(e.inputs.first(),if(e.video)"video/mp4" else "image/png")
             Text("${e.inputs.size} file(s) · ${if(e.video)"video" else "images"}",color=Cream,fontSize=12.sp)
             if(e.tool!="clipper")LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.inputs.size) { i -> Text("▣ ${i+1}",Modifier.background(LocalConsole.current.shell).padding(10.dp),color=Cream) } }

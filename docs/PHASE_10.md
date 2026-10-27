@@ -11,6 +11,7 @@ Version 0.10 adds a verified release build path, owner signing configuration, AP
 * Best-effort development-key caching and explicit upgrade/signing instructions. A persistent owner key is the reliable production update path; caching cannot guarantee an older debug APK's signing identity.
 * Settings → **CHECK DEVICE & BUILD**: Android/CPU, actual kernel page size, available memory/storage, H.264 encoders, app version and signing fingerprint. **EXPORT DEVICE REPORT** uses the Android document picker. Reports exclude identifiers, private paths, media, projects and backend settings and are never uploaded by the app.
 * An actual v0.9 → v0.10 `adb install -r` workflow on Android 10 and 15. It retains an imported media hash, favorite project/recipe, DataStore settings and committed automatic history, then runs a fresh offline export after the update. No uninstall or data clear is used.
+* Preview position updates wait for ready playback and are bound to the selected clip and seek request. Late positions from preparation or a previous clip cannot reset a newly chosen split point. This fixes a race reproduced by Android 10 UI validation.
 
 ## Validation and boundaries
 

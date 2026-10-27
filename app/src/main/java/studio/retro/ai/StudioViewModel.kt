@@ -404,7 +404,12 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         editor.value=e.copy(playheadMs=position,previewRequestMs=position)
         scheduleAutosave()
     }
-    fun previewPosition(ms:Long) { val e=editor.value; if(e.tool=="clipper")editor.value=e.copy(playheadMs=ms) }
+    fun previewPosition(clipId:String,request:Long?,ms:Long) {
+        val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip) ?: return
+        // Ignore callbacks queued before the latest seek or from a previously selected block.
+        if(e.tool=="clipper" && clip.id==clipId && e.previewRequestMs==request && ms in clip.startMs..clip.endMs)
+            editor.value=e.copy(playheadMs=ms)
+    }
     fun importCaptions(uri:Uri) = launch {
         val text=withContext(Dispatchers.IO) { app.contentResolver.openInputStream(uri)!!.bufferedReader().use { val chars=CharArray(1_000_001); var count=0; while(count<chars.size) { val n=it.read(chars,count,chars.size-count); if(n<0)break; count+=n }; require(count<=1_000_000) { "Subtitle file exceeds 1 MB." }; String(chars,0,count) } }
         val e=editor.value; val cues=CaptionTrack.parse(text,e.clips.sumOf { it.durationMs }.coerceAtLeast(1))

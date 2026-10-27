@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
@@ -33,9 +34,16 @@ import java.io.File
             if(rangeEndMs!=null && rangeEndMs>rangeStartMs)item.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(rangeStartMs).setEndPositionMs(rangeEndMs).build())
             setMediaItem(item.build()); prepare()
         } }
-        LaunchedEffect(player,seekPositionMs) { seekPositionMs?.let { player.seekTo((it-rangeStartMs).coerceAtLeast(0)) } }
         val positionCallback by rememberUpdatedState(onPositionChanged)
-        LaunchedEffect(player) { if(positionCallback!=null)while(isActive) { positionCallback?.invoke(player.currentPosition+rangeStartMs); delay(100) } }
+        LaunchedEffect(player,seekPositionMs) {
+            seekPositionMs?.let { player.seekTo((it-rangeStartMs).coerceAtLeast(0)) }
+            while(isActive && positionCallback!=null) {
+                // Preparing/buffering can temporarily report zero, before the seek is applied.
+                if(player.playbackState==Player.STATE_READY || player.playbackState==Player.STATE_ENDED)
+                    positionCallback?.invoke(player.currentPosition+rangeStartMs)
+                delay(100)
+            }
+        }
         DisposableEffect(player) { onDispose { player.release() } }
         AndroidView(factory={ PlayerView(it).apply { this.player=player } },update={ it.player=player },modifier=modifier.fillMaxWidth().height(230.dp))
     } else if(mime=="image/gif") {
