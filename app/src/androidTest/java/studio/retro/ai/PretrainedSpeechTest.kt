@@ -54,7 +54,7 @@ class PretrainedSpeechTest {
             assertTrue(text,setOf("one","two","three","four","five").count { text.split(' ').contains(it) }>=3)
             assertTrue(cues.all { it.startMs>=500 && it.endMs<=duration+500 })
             withContext(Dispatchers.Main) { vm.applyTranscript(transcript) }
-            withTimeout(30000) { vm.editor.first { it.captions.contains("KEEP INTRO") && it.captions.contains("one") } }
+            withTimeout(30000) { vm.editor.first { it.captions.contains("KEEP INTRO") && it.captions.contains(cues.first().text) } }
             assertEquals("KEEP INTRO",CaptionTrack.textAt(CaptionTrack.parse(vm.editor.value.captions,duration+500),100))
             val before=app.database.projects().observe().first().map { it.id }.toSet()
             withContext(Dispatchers.Main) { vm.create() }
