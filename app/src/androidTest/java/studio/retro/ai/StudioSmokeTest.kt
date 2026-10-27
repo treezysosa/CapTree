@@ -38,6 +38,8 @@ class StudioSmokeTest {
             compose.waitUntil(10000) { vm.editor.value.playheadMs in 800L..1600L }
             compose.onNodeWithText("SPLIT AT PLAYHEAD").performScrollTo().performClick()
             compose.runOnIdle { assertEquals(2,vm.editor.value.clips.size); assertEquals(2400L,vm.editor.value.clips.sumOf { it.durationMs }) }
+            // Bring the vertical editor to the timeline before scrolling its nested row.
+            compose.onNodeWithText("CLIP TIMELINE",substring=true).performScrollTo()
             compose.onNodeWithText("CLIP 2").performScrollTo().performClick()
             compose.waitUntil(5000) { vm.editor.value.selectedClip==1 }
             compose.onNodeWithText("CLIP 2").assertIsSelected()
