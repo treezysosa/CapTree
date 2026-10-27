@@ -22,8 +22,16 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Reuse development signing key when cached
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: retro-development-signing-v1
       - run: chmod +x gradlew
-      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - run: python3 -m unittest discover -s tools/tests -v
+      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug lintRelease assembleDebug assembleRelease
+      - name: Verify actual APK permissions, native alignment and signatures
+        run: bash tools/verify_apks.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -31,6 +39,23 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/reports/
+            apk-verification/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: retro-ai-studio-release-unsigned
+          path: |
+            app/build/outputs/apk/release/*-unsigned.apk
+            apk-verification/
+          retention-days: 14
+      - name: Validate release signing with a disposable CI key
+        run: bash tools/validate_release_signing.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-signing-verification
+          path: signing-validation/
           retention-days: 14
   backend:
     runs-on: ubuntu-latest

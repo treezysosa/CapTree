@@ -1,0 +1,56 @@
+name: Validate in-place Android upgrade
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/upgrade-validation.yml'
+      - 'app/build.gradle.kts'
+      - 'app/src/main/java/studio/retro/ai/data/**'
+      - 'app/src/androidTest/java/studio/retro/ai/PhaseTenUpgradeTest.kt'
+      - 'tools/run_upgrade_tests.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: upgrade-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the verified v0.9 baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 9dd66df0b282747ea7404b567eb96c5e15205810
+          path: previous-version
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          RETRO_PREVIOUS_DIR: ${{ github.workspace }}/previous-version
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 256M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 2048
+          script: bash tools/run_upgrade_tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: in-place-upgrade-api-${{ matrix.api }}
+          path: upgrade-validation/
+          retention-days: 14

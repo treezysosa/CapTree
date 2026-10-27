@@ -1,0 +1,56 @@
+name: Package owner-signed Android release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Stage owner signing key
+        env:
+          RETRO_RELEASE_KEYSTORE_BASE64: ${{ secrets.RETRO_RELEASE_KEYSTORE_BASE64 }}
+          RETRO_RELEASE_STORE_PASSWORD: ${{ secrets.RETRO_RELEASE_STORE_PASSWORD }}
+          RETRO_RELEASE_KEY_ALIAS: ${{ secrets.RETRO_RELEASE_KEY_ALIAS }}
+          RETRO_RELEASE_KEY_PASSWORD: ${{ secrets.RETRO_RELEASE_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          names = ['RETRO_RELEASE_KEYSTORE_BASE64', 'RETRO_RELEASE_STORE_PASSWORD', 'RETRO_RELEASE_KEY_ALIAS', 'RETRO_RELEASE_KEY_PASSWORD']
+          if not all(os.environ.get(name) for name in names):
+              raise SystemExit('Configure all four owner signing secrets before running this workflow. See docs/RELEASE.md.')
+          path = Path(os.environ['RUNNER_TEMP']) / 'retro-owner.jks'
+          path.write_bytes(base64.b64decode(os.environ[names[0]], validate=True))
+          path.chmod(0o600)
+          PY
+      - name: Build and verify signed release
+        env:
+          RETRO_RELEASE_STORE_FILE: ${{ runner.temp }}/retro-owner.jks
+          RETRO_RELEASE_STORE_PASSWORD: ${{ secrets.RETRO_RELEASE_STORE_PASSWORD }}
+          RETRO_RELEASE_KEY_ALIAS: ${{ secrets.RETRO_RELEASE_KEY_ALIAS }}
+          RETRO_RELEASE_KEY_PASSWORD: ${{ secrets.RETRO_RELEASE_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon testDebugUnitTest lintRelease assembleDebug assembleRelease
+          bash tools/verify_apks.sh
+          test -f app/build/outputs/apk/release/app-release.apk
+      - name: Remove staged signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/retro-owner.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retro-ai-studio-owner-signed
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            apk-verification/
+          retention-days: 14

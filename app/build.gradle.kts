@@ -11,13 +11,27 @@ android {
         applicationId = "studio.retro.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.9.0"
+        versionCode = 10
+        versionName = "0.10.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
+    val releaseSigning = listOf("RETRO_RELEASE_STORE_FILE", "RETRO_RELEASE_STORE_PASSWORD", "RETRO_RELEASE_KEY_ALIAS", "RETRO_RELEASE_KEY_PASSWORD").associateWith { System.getenv(it).orEmpty() }
+    require(releaseSigning.values.all { it.isBlank() } || releaseSigning.values.all { it.isNotBlank() }) {
+        "Set all four RETRO_RELEASE signing variables, or leave all unset for an unsigned release."
+    }
+    if (releaseSigning.values.all { it.isNotBlank() }) {
+        signingConfigs.create("ownerRelease") {
+            storeFile = file(releaseSigning.getValue("RETRO_RELEASE_STORE_FILE"))
+            storePassword = releaseSigning.getValue("RETRO_RELEASE_STORE_PASSWORD")
+            keyAlias = releaseSigning.getValue("RETRO_RELEASE_KEY_ALIAS")
+            keyPassword = releaseSigning.getValue("RETRO_RELEASE_KEY_PASSWORD")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("ownerRelease")
+    }
+    packaging { jniLibs.useLegacyPackaging = false }
     packaging { resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/DEPENDENCIES") }
     testOptions { unitTests.isReturnDefaultValues = true }
 }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import studio.retro.ai.data.BackendClient
 import studio.retro.ai.media.SpeechModelStore
 import androidx.compose.ui.platform.LocalUriHandler
+import studio.retro.ai.data.DeviceReport
 
 @Composable fun SettingsScreen(vm:StudioViewModel) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -37,6 +38,14 @@ import androidx.compose.ui.platform.LocalUriHandler
     val speechModel=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.speechModel(uri) }
     val speechInstalled by vm.speechInstalled.collectAsStateWithLifecycle()
     val uriHandler=LocalUriHandler.current
+    var deviceReport by remember { mutableStateOf("") }
+    val saveReport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if(uri!=null)vm.launch {
+            val snapshot=deviceReport
+            withContext(Dispatchers.IO) { requireNotNull(context.contentResolver.openOutputStream(uri)).bufferedWriter().use { it.write(snapshot) } }
+            vm.message.value="Device report saved to your selected file."
+        }
+    }
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText("CONSOLE SETTINGS",color=LocalConsole.current.lcd)
         Choice("SHELL THEME",listOf("Classic Purple","Glacier Blue","Retro Green"),prefs.theme) { value -> vm.launch { vm.settings.theme(value) } }
@@ -79,6 +88,13 @@ import androidx.compose.ui.platform.LocalUriHandler
         RaisedButton("REMOVE AI MODEL",{ vm.launch { require(!importing && vm.projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish." }; File(context.filesDir,"models/realesrgan-x4.onnx").delete(); File(context.filesDir,"models/validation.txt").delete(); modelInstalled=false; vm.modelReport.value=""; vm.message.value="Model removed." } })
         PixelText("ABOUT · v${studio.retro.ai.BuildConfig.VERSION_NAME}",size=9,color=LocalConsole.current.accent)
         Text("RETRO AI STUDIO\nAn original handheld-inspired creation studio. Android 8+ · Kotlin / Compose.\nPress Start 2P © its authors, SIL Open Font License 1.1. Media3 / AndroidX: Apache 2.0. ONNX Runtime: MIT.\nModel licenses are separate; see THIRD_PARTY_NOTICES.md. Not affiliated with Nintendo.",fontSize=12.sp)
+        PixelText("DEVICE & BUILD CHECK",size=9,color=LocalConsole.current.accent)
+        Text("Check this build's signing fingerprint, Android/CPU, memory, storage, page size and H.264 encoders. The report stays on this phone unless you choose to export it. It excludes your media, project text, server URL and token.",fontSize=12.sp)
+        RaisedButton("CHECK DEVICE & BUILD",{ vm.launch { deviceReport=withContext(Dispatchers.IO) { DeviceReport.collect(context) } } })
+        if(deviceReport.isNotBlank()) {
+            Text(deviceReport,fontSize=10.sp)
+            RaisedButton("EXPORT DEVICE REPORT",{ saveReport.launch("retro-studio-device.json") })
+        }
         RaisedButton("OPEN SAVE GAMES",{ vm.screen.value="projects" })
     }
 }

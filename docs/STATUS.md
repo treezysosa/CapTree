@@ -1,4 +1,4 @@
-# Version 0.9 boundaries and verification
+# Version 0.10 boundaries and verification
 
 This repository implements a native, installable Android MVP. The feature names reflect the product cartridges; conventional algorithms are labeled in the UI.
 
@@ -51,3 +51,5 @@ Phase 7 adds native frame-sampling, selected-frame consent/worker rejection, sav
 Phase 8 adds verified speech-model import/replacement, PCM resampling and timestamp grouping tests, native selected-audio conversion, local-worker readiness and UI checks. A separate pretrained-model workflow runs actual CPU and Android speech inference, timed SRT and captioned MP4 export. Physical ARM/16 KB page-size phone tests remain unvalidated.
 
 Phase 9 adds Room v1→v2 migration/preservation tests, bounded checkpoint serialization, stale/deleted save rejection, autosave UI and media retention checks. A separate Android 10/15 workflow force-stops the app between independent instrumentations, restores the committed timeline/history and exports real captioned MP4 with audio. See [recovery behavior and limits](PHASE_9.md).
+
+Phase 10 adds debug/release manifest and native 16 KB ELF/ZIP packaging gates, a disposable-key signing check, an optional owner-signed workflow and local device/build report. Separate Android 10/15 checks install v0.9 then update in place and verify retained projects/settings/history/media plus a fresh offline export. Static packaging checks do not certify physical ARM/16 KB inference. See [release builds](RELEASE.md) and [Phase 10](PHASE_10.md).

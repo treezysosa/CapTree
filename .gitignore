@@ -25,3 +25,7 @@ clip-model/
 app/src/androidTest/assets/speech-validation/
 offline-speech-device/
 process-recovery/
+apk-verification/
+upgrade-validation/
+previous-version/
+signing-validation/
