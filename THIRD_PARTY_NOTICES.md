@@ -8,6 +8,8 @@
 * FastAPI: MIT; Uvicorn: BSD 3-Clause; Pillow: HPND; PyTorch: BSD-style; Diffusers / Transformers / Accelerate: Apache License 2.0.
 * Gradle wrapper: Apache License 2.0; upstream wrapper JAR includes its license notices.
 
-Model weights are not included. Real-ESRGAN / BasicSR use BSD 3-Clause; verify the exact checkpoint's terms. Stable Diffusion 1.5 uses CreativeML Open RAIL-M, including use restrictions. CogVideoX-2b and CogVideoX-5b-I2V have different model licenses; consult the exact repository revision and applicable commercial terms before using or redistributing. Faster-whisper is MIT; Whisper model licenses are separate. These models are optional, are not hosted by this app, and do not imply a paid inference API.
+Model weights are not included. Real-ESRGAN uses BSD 3-Clause; BasicSR uses Apache 2.0 with additional component terms. Verify the exact checkpoint's terms. Stable Diffusion 1.5 uses CreativeML Open RAIL-M, including use restrictions. CogVideoX-2b and CogVideoX-5b-I2V have different model licenses; consult the exact repository revision and applicable commercial terms before using or redistributing. Faster-whisper is MIT; Whisper model licenses are separate. These models are optional, are not hosted by this app, and do not imply a paid inference API.
+
+Optional GFPGAN v1.4 clean restoration uses separately installed GFPGAN, BasicSR and facexlib packages/model weights. The full upstream [GFPGAN license and third-party terms](backend/licenses/GFPGAN-LICENSE.txt) are included, with Apache/MIT/BSD and additional component terms. The app does not bundle those weights or claim that every dependency has the same license. The face-validation fixture is scikit-image's public-domain NASA astronaut photograph; the model evidence records its source.
 
 Original pixel icons and console artwork were created for RETRO AI STUDIO. No Nintendo logos or copyrighted game artwork are included. RETRO AI STUDIO is not affiliated with Nintendo.

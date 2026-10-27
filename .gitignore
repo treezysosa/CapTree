@@ -16,3 +16,7 @@ backend/models/
 .env
 model-validation/
 app/src/androidTest/assets/validation/
+.face-model-cache/
+face-models/
+.venv-face/
+*.retro.zip

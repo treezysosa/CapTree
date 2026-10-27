@@ -24,6 +24,12 @@ object ProjectArchive {
     private val extensions=setOf("jpg","jpeg","png","webp","gif","mp4","mov","mkv","webm","srt")
     private val scalars=setOf("tool","video","start","end","fps","speed","width","loop","caption","sticker","format","scale","intensity","denoise","sharpen","prompt","negative","style","aspect","seed","duration","motion","captions","transcription_language","selected_clip","stabilize","gif_palette","gif_dither","face_restore","face_strength","face_restoration_applied","transcribe_index","caption_offset","quality")
     private data class Asset(val key:String,val file:File,val size:Long,val hash:String,val crc:Long)
+    fun interruptedStaging(filesRoot:File):List<File> {
+        val directory=File(filesRoot,"restore-temp").canonicalFile
+        return directory.listFiles().orEmpty().filter { file ->
+            file.isDirectory && runCatching { UUID.fromString(file.name).toString()==file.name && file.canonicalFile.parentFile==directory }.getOrDefault(false)
+        }
+    }
 
     private fun recipe(source:JSONObject,map:(String)->String):JSONObject=JSONObject().apply {
         for(key in scalars)if(source.has(key)) {
@@ -154,14 +160,14 @@ object ProjectArchive {
                 for(key in inputKeys) {
                     check()
                     val original=unpacked.getValue(key); val destination=File(filesRoot,"imports/${UUID.randomUUID()}.${original.extension}")
-                    created+=destination
                     require(!destination.exists() && original.renameTo(destination)) { "Cannot restore input media." }
+                    created+=destination
                     paths[key]=destination.path
                 }
                 var result=""
                 if(outputKey.isNotEmpty()) {
                     check(); val original=unpacked.getValue(outputKey); val destination=File(filesRoot,"outputs/$id.${original.extension}")
-                    created+=destination; require(!destination.exists() && original.renameTo(destination)) { "Cannot restore output media." }; result=destination.path
+                    require(!destination.exists() && original.renameTo(destination)) { "Cannot restore output media." }; created+=destination; result=destination.path
                 }
                 val clean=recipe(manifest.getJSONObject("recipe")) { paths.getValue(it) }.put("tool",if(tool=="transcribe")"clipper" else tool)
                 val project=Project(id,(manifest.optString("name","RESTORED PROJECT").take(70)+" RESTORED").take(80),tool,clean.toString(),status=if(result.isEmpty())"draft" else "completed",output=result,mime=if(result.isEmpty())"" else mime,favorite=manifest.optBoolean("favorite"))

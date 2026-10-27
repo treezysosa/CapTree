@@ -2,6 +2,8 @@
 
 Local photo/video/GIF editing needs no server. Generation uses real Diffusers pipelines on your own machine. Software has no app fees; GPU hardware, storage, electricity, or rented hosting may cost money.
 
+Version 0.6 optionally adds [GFPGAN face restoration on CPU](FACE_RESTORATION.md). Install its separate packages and verified weights to enable the `face-restoration` capability. It does not require Diffusers or CUDA. Existing generation/transcription endpoints and API v2 remain compatible.
+
 ## Install
 
 Use Python 3.11 on Linux; an NVIDIA GPU with compatible drivers is recommended. Stable Diffusion 1.5 can run slowly on CPU or on a GPU with around 6 GB VRAM. CogVideoX-2b requires CUDA; budget roughly 16 GB GPU RAM and substantial host RAM when offloading. The 5b I2V model often needs 24+ GB GPU RAM and 32+ GB system RAM. Actual requirements depend on precision, model version, and drivers. Allow tens of GB of model disk space.

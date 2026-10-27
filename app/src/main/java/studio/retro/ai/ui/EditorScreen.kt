@@ -64,7 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 PhotoAdjustments(vm,e)
             }
             "enhance" -> {
-                Text(if(e.video)"GPU brightness, contrast, saturation, spatial denoising, sharpening and optional translation stabilization. These are traditional algorithms. Face restoration needs an additional model." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
+                Text(if(e.video)"GPU brightness, contrast, saturation, spatial denoising, sharpening and optional translation stabilization. These are traditional algorithms." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
                 PhotoAdjustments(vm,e)
             }
             "clipper" -> {

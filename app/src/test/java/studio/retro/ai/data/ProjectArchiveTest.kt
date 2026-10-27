@@ -93,4 +93,13 @@ class ProjectArchiveTest {
             try { ProjectArchive.write(Project("id","bad","photo",recipe.toString()),root,ByteArrayOutputStream()); fail("Private settings must not be exported") } catch(expected:IllegalArgumentException) { assertTrue(expected.message!!.contains("private media")) }
         } finally { root.deleteRecursively() }
     }
+    @Test fun interruptedImportCleanupSelectsOnlyOwnedUuidFolders() {
+        val root=root()
+        try {
+            val interrupted=File(root,"restore-temp/${java.util.UUID.randomUUID()}").apply { mkdirs(); resolve("part.png").writeBytes(byteArrayOf(1)) }
+            File(root,"restore-temp/keep-this-folder").mkdirs()
+            File(root,"imports/${java.util.UUID.randomUUID()}").mkdirs()
+            assertEquals(listOf(interrupted.canonicalFile),ProjectArchive.interruptedStaging(root))
+        } finally { root.deleteRecursively() }
+    }
 }

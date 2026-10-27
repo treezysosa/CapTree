@@ -305,10 +305,12 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         withContext(Dispatchers.IO) { app.contentResolver.openOutputStream(uri)!!.bufferedWriter().use { it.write(text) } }; message.value="SRT captions exported."
     }
     fun clean() = launch {
+        require(!importing.value) { "Wait for the current import or transfer to finish." }
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
         val retained=(history.states()+editor.value).flatMap { it.inputs+(it.clips+it.captionSourceClips).map { clip -> clip.path } }.toSet()
         withContext(Dispatchers.IO) {
             app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            ProjectArchive.interruptedStaging(app.filesDir).forEach { it.deleteRecursively() }
             val used=projects.value.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained
             File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
         }; message.value="Cache and unused imports cleared."
