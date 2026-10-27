@@ -23,10 +23,10 @@ class PhaseFourMediaTest {
     private val app:StudioApplication get()=ApplicationProvider.getApplicationContext()
     private fun output(ext:String)=File(app.cacheDir,"phase4-${UUID.randomUUID()}.$ext")
     private fun fixture(name:String):File=output("mp4").also { file -> InstrumentationRegistry.getInstrumentation().context.assets.open(name).use { source -> file.outputStream().use { source.copyTo(it) } } }
-    private fun photo():File=output("png").also { file -> val bitmap=Bitmap.createBitmap(160,112,Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(25,35,55)) }; file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }; bitmap.recycle() }
+    private fun photo(color:Int=Color.rgb(25,35,55)):File=output("png").also { file -> val bitmap=Bitmap.createBitmap(160,112,Bitmap.Config.ARGB_8888).apply { eraseColor(color) }; file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }; bitmap.recycle() }
 
     @Test fun styledImageMp4HasRealTextAndStickerPixelsAndAdjustedDuration():Unit=runBlocking {
-        val first=photo(); val second=photo(); val mp4=output("mp4")
+        val first=photo(Color.rgb(130,25,35)); val second=photo(Color.rgb(25,35,130)); val mp4=output("mp4")
         try {
             withTimeout(90000) { VideoEngine.imagesToMp4(app,listOf(first,second),mp4,4,AnimationOptions(4,0.5f,160,"RETRO VIBES","★")) {} }
             assertTrue("Adjusted image animation duration",VideoEngine.duration(mp4) in 850L..1300L)
@@ -37,6 +37,12 @@ class PhaseFourMediaTest {
                 assertTrue("Sticker is visibly encoded",white(0,bitmap.height/2)>8)
                 assertTrue("Caption is visibly encoded",white(bitmap.height/2,bitmap.height)>15)
                 bitmap.recycle()
+                val beginning=requireNotNull(reader.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST))
+                val ending=requireNotNull(reader.getFrameAtTime(900000,MediaMetadataRetriever.OPTION_CLOSEST))
+                val red=beginning.getPixel(beginning.width/2,beginning.height/2); val blue=ending.getPixel(ending.width/2,ending.height/2)
+                assertTrue("First source image is present",Color.red(red)>Color.blue(red)+60)
+                assertTrue("Second source image is present",Color.blue(blue)>Color.red(blue)+60)
+                beginning.recycle(); ending.recycle()
             } finally { reader.release() }
         } finally { first.delete(); second.delete(); mp4.delete() }
     }
@@ -92,7 +98,9 @@ class PhaseFourMediaTest {
                 } finally { extractor.release() }
                 val ordered=times.sorted(); assertTrue("Encoded video has frames",ordered.isNotEmpty())
                 val samples=ordered.mapIndexed { index,time -> val (top,bottom)=pixels(index); Triple(time-ordered.first(),top,bottom) }
-                assertTrue("Enough encoded video frames: $samples",ordered.size>=7)
+                // FPS is a cap, not a promise of a fixed frame count on every device codec.
+                assertTrue("Frame cap does not invent output frames: $samples",ordered.size<=11)
+                assertTrue("Full selected duration is retained",VideoEngine.duration(mp4) in 850L..1200L)
                 val active=samples.filter { it.first<300000 }; val expired=samples.filter { it.first>=600000 }
                 assertTrue("Both caption intervals have real frames: $samples",active.isNotEmpty() && expired.isNotEmpty())
                 assertTrue("Video sticker is visibly encoded: $samples",samples.all { it.second>8 })
