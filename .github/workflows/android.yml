@@ -42,7 +42,7 @@ jobs:
       - run: pip install -r backend/requirements-test.txt
       - run: python -m pytest backend/tests -q
   device:
-    needs: android
+    # connectedDebugAndroidTest builds its APKs, so device checks can run independently.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
