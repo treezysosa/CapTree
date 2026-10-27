@@ -48,6 +48,12 @@ class BackendClient(endpoint:String,private val token:String,private val client:
         require(audio.length() in 1..64L*1024*1024) { "Selected audio must be smaller than 64 MB." }
         submit("/v1/transcriptions",JSONObject().put("tool","transcribe").put("language",language),audio,"audio","audio/wav",output,"application/x-subrip",progress)
     }
+    suspend fun restoreFace(image:File,strength:Float,output:File,progress:suspend(Int?,String)->Unit) {
+        require(strength.isFinite() && strength>0f && strength<=1f) { "Choose face strength between 0 and 1." }
+        require(image.length() in 1..12L*1024*1024) { "Face restoration uploads support PNG photos up to 12 MB. Reduce input dimensions or turn off face restoration." }
+        requireCapability("face-restoration")
+        submit("/v1/face-restorations",JSONObject().put("tool","restore-face").put("strength",strength.toDouble()),image,"image","image/png",output,"image/png",progress)
+    }
     private suspend fun submit(path:String,payload:JSONObject,input:File?,field:String,mime:String,output:File,expectedMime:String,progress:suspend(Int?,String)->Unit):Long {
         val body=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("payload",payload.toString()).apply { input?.let { addFormDataPart(field,if(field=="audio")"selected.wav" else "input.png",it.asRequestBody(mime.toMediaType())) } }.build()
         var id:String?=null; var actualSeed=-1L; var complete=false

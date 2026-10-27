@@ -32,7 +32,8 @@ data class EditorState(
     val transcriptionLanguage:String="auto", val stabilize:Boolean=false,
     val suggestedClips:List<SuggestedClip> = emptyList(),
     val gifPalette:String="Adaptive 256", val gifDither:Boolean=false,
-    val captionSourceClips:List<ClipEdit> = emptyList(), val captionSourceCues:List<CaptionCue> = emptyList()
+    val captionSourceClips:List<ClipEdit> = emptyList(), val captionSourceCues:List<CaptionCue> = emptyList(),
+    val faceRestore:Boolean=false, val faceStrength:Float=0.7f
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -46,6 +47,7 @@ data class EditorState(
         put("selected_clip",selectedClip)
         put("stabilize",stabilize)
         put("gif_palette",gifPalette); put("gif_dither",gifDither)
+        put("face_restore",faceRestore); put("face_strength",faceStrength.toDouble())
         put("caption_source_clips",JSONArray().apply { captionSourceClips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id); put("origin",clip.originId) }) } })
         put("caption_source_cues",JSONArray().apply { captionSourceCues.forEach { cue -> put(JSONObject().apply { put("start",cue.startMs); put("end",cue.endMs); put("text",cue.text) }) } })
     }
@@ -60,7 +62,7 @@ data class EditorState(
             val sourceCues=if(sourceArray==null)emptyList() else List(sourceArray.length()) { i -> val cue=sourceArray.getJSONObject(i); CaptionCue(cue.getLong("start"),cue.getLong("end"),cue.getString("text")) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues)
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues,faceRestore=r.optBoolean("face_restore"),faceStrength=r.optDouble("face_strength",0.7).toFloat())
         }
     }
 }
@@ -75,6 +77,11 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val message=MutableStateFlow("")
     val importing=MutableStateFlow(false)
     val busyMessage=MutableStateFlow("READING YOUR MEDIA...")
+    val busyPercent=MutableStateFlow<Int?>(null)
+    val transferActive=MutableStateFlow(false)
+    val faceConfirmation=MutableStateFlow(false)
+    private var transferJob:Job?=null
+    private var transferCommitted=false
     val modelReport=MutableStateFlow("")
     val backendReport=MutableStateFlow<JSONObject?>(null)
     val active=MutableStateFlow<String?>(null)
@@ -82,10 +89,10 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     private val history=EditHistory<EditorState>()
     val canUndo=MutableStateFlow(false); val canRedo=MutableStateFlow(false)
     private fun updateHistory() { canUndo.value=history.canUndo; canRedo.value=history.canRedo }
-    private fun clearHistory() { history.clear(); updateHistory() }
+    private fun clearHistory() { history.clear(); updateHistory(); faceConfirmation.value=false }
     private fun snapshot(e:EditorState)=e.copy(playheadMs=0,previewRequestMs=null,suggestions=emptyList(),suggestedClips=emptyList())
     fun open(tool:String) { clearHistory(); editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
-    fun back() { screen.value="home" }
+    fun back() { faceConfirmation.value=false; screen.value="home" }
     private fun trim(e:EditorState):ClipEdit? {
         val clip=e.clips.getOrNull(e.selectedClip) ?: return null
         val start=e.start.toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 && it<=clip.sourceDurationMs/1000.0 } ?: return null
@@ -162,12 +169,17 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         work.enqueueUniqueWork(project.id,ExistingWorkPolicy.KEEP,request)
         active.value=project.id; screen.value="processing"
     }
-    fun create(draft:Boolean=false) = launch {
+    fun create(draft:Boolean=false,faceConfirmed:Boolean=false) = launch {
         require(!importing.value) { "Wait for the current import or model test to finish." }
         val e=editor.value
         if(!draft) {
             if(e.tool in setOf("photo","video","aigif")) { require(e.prompt.isNotBlank()) { "Enter a prompt." }; require(prefs.value.backend.isNotBlank() && prefs.value.remoteConsent) { "Set up an HTTPS backend and allow remote processing in Settings." } }
             else require(e.inputs.isNotEmpty()) { "Import media first." }
+            if(e.faceRestore && !e.video && e.tool in setOf("enhance","upscale")) {
+                require(prefs.value.remoteConsent && prefs.value.backend.isNotBlank()) { "Configure a face-restoration backend and allow remote processing in Settings first." }
+                require(e.faceStrength.isFinite() && e.faceStrength>0f && e.faceStrength<=1f)
+                if(!faceConfirmed) { faceConfirmation.value=true; return@launch }
+            }
             if(e.tool=="clipper") {
                 require(trim(e)==e.clips.getOrNull(e.selectedClip) && trim(e)!=null) { "Enter valid trim times and keep at least 40 milliseconds." }
                 e.clips.forEach { it.validated() }
@@ -175,7 +187,9 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             }
             if(e.tool=="gif" && e.video && e.format=="GIF")EditRules.frameTimes(((e.start.toDoubleOrNull() ?: 0.0)*1000).toLong(),((e.end.toDoubleOrNull() ?: 0.0)*1000).toLong(),e.fps,e.speed)
         }
-        val p=Project(UUID.randomUUID().toString(),"${e.tool.uppercase()} · ${java.text.SimpleDateFormat("MMM dd HH:mm",java.util.Locale.US).format(java.util.Date())}",e.tool,e.recipe(prefs.value).toString())
+        faceConfirmation.value=false
+        val recipe=e.recipe(prefs.value).put("face_upload_confirmed",!draft && faceConfirmed && e.faceRestore)
+        val p=Project(UUID.randomUUID().toString(),"${e.tool.uppercase()} · ${java.text.SimpleDateFormat("MMM dd HH:mm",java.util.Locale.US).format(java.util.Date())}",e.tool,recipe.toString())
         if(draft) { dao.save(p); message.value="Saved in projects." } else enqueue(p)
     }
     fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.status(project.id,"cancelled") }
@@ -189,7 +203,11 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         }
         clearHistory(); editor.value=state; screen.value="editor"
     }
-    fun retry(project:Project) = launch { enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output="")) }
+    fun retry(project:Project) = launch {
+        if(JSONObject(project.recipe).let { it.optBoolean("face_restore") && !it.optBoolean("video") } && project.tool in setOf("enhance","upscale")) {
+            clearHistory(); editor.value=EditorState.restore(project.tool,project.recipe); screen.value="editor"; faceConfirmation.value=true
+        } else enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output=""))
+    }
     fun rename(project:Project,name:String) = launch { dao.rename(project.id,name.take(80).ifBlank { project.name }) }
     fun favorite(project:Project) = launch { dao.favorite(project.id,!project.favorite) }
     fun duplicate(project:Project) = launch {
@@ -211,6 +229,39 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         }; message.value="Saved to gallery."
     }
     fun export(project:Project,uri:Uri) = launch { withContext(Dispatchers.IO) { app.contentResolver.openOutputStream(uri)!!.use { sink -> File(project.output).inputStream().use { it.copyTo(sink) } } }; message.value="Export complete." }
+    private fun transfer(label:String,completeMessage:String,block:suspend()->Unit) {
+        if(importing.value) { message.value="Wait for the current import or transfer to finish."; return }
+        importing.value=true; transferActive.value=true; transferCommitted=false; busyPercent.value=null; busyMessage.value=label
+        transferJob=viewModelScope.launch {
+            try { block(); message.value=completeMessage }
+            catch(e:CancellationException) { message.value=if(transferCommitted)completeMessage else "Transfer cancelled."; throw e }
+            catch(e:Exception) { message.value=e.message ?: "Project transfer failed." }
+            catch(e:OutOfMemoryError) { message.value="Not enough memory to transfer this project." }
+            finally { importing.value=false; transferActive.value=false; busyPercent.value=null; busyMessage.value="READING YOUR MEDIA..."; transferJob=null }
+        }
+    }
+    fun cancelTransfer() { if(transferActive.value)transferJob?.cancel() }
+    fun backup(project:Project,uri:Uri)=transfer("BACKING UP PROJECT...","Project backup saved. It includes media and edits, without server credentials.") {
+        withContext(Dispatchers.IO) {
+            var complete=false
+            try {
+                val context=currentCoroutineContext()
+                app.contentResolver.openOutputStream(uri,"wt")!!.use { output -> ProjectArchive.write(project,app.filesDir,output,check={context.ensureActive()},progress={busyPercent.value=it}) }
+                complete=true; transferCommitted=true
+            } finally { if(!complete)runCatching { android.provider.DocumentsContract.deleteDocument(app.contentResolver,uri) } }
+        }
+    }
+    fun importBackup(uri:Uri)=transfer("RESTORING PROJECT...","Project restored as a new save. Server settings, credentials and model weights were not imported.") {
+        withContext(Dispatchers.IO) {
+            val context=currentCoroutineContext()
+            app.contentResolver.openInputStream(uri)!!.use { input ->
+                ProjectArchive.restore(input,app.filesDir,check={context.ensureActive()},progress={busyPercent.value=it}) { project ->
+                    transferActive.value=false
+                    dao.save(project); transferCommitted=true; screen.value="projects"
+                }
+            }
+        }
+    }
     fun analyze(silence:Boolean) = launch {
         importing.value=true
         try { val e=editor.value; require(e.inputs.isNotEmpty() && e.video) { "Import a video first." }; val path=e.clips.getOrNull(e.selectedClip)?.path ?: e.inputs.first(); val points=if(silence)VideoEngine.silence(File(path)) else VideoEngine.scenes(File(path)); edit { it.copy(suggestions=points) }; message.value=if(points.isEmpty())"No ${if(silence)"quiet audio" else "scene cuts"} detected." else "${points.size} measured suggestions are ready. Tap a timestamp to seek, then split or trim." } finally { importing.value=false }

@@ -43,7 +43,7 @@ import studio.retro.ai.data.BackendClient
         RaisedButton("IMPORT ONNX MODEL",{ model.launch(arrayOf("application/octet-stream","application/onnx","*/*")) })
         RaisedButton("RUN ON-DEVICE MODEL TEST",vm::testModel,enabled=modelInstalled && !importing)
         if(modelInstalled && modelReport.isNotBlank())Text(modelReport,fontSize=10.sp,color=LocalConsole.current.accent)
-        Text("Model weights are not bundled. See docs/MODELS.md for export commands, tensor format, attribution, and memory limits. Face restoration needs a separate compatible model and is unavailable here.",fontSize=12.sp)
+        Text("Model weights are not bundled. See docs/MODELS.md for export commands, tensor format, attribution, and memory limits. Optional GFPGAN face restoration uses separately configured models on your CPU server.",fontSize=12.sp)
         PixelText("OPTIONAL AI SERVER",size=9,color=LocalConsole.current.accent)
         RetroField("HTTPS BACKEND URL",url,{ url=it })
         OutlinedTextField(token,{ token=it },Modifier.fillMaxWidth(),label={ Text("Replace server token (blank keeps current)") },singleLine=true,visualTransformation=PasswordVisualTransformation())
@@ -57,11 +57,11 @@ import studio.retro.ai.data.BackendClient
             }
         }
         RetroToggle("Allow remote AI processing",prefs.remoteConsent) { value -> vm.launch { require(!value || prefs.backend.isNotBlank()) { "Save a backend URL first." }; vm.settings.consent(value) } }
-        Text("Starting remote generation sends your prompt and optional image to this server. Automatic subtitles send only selected audio after an additional confirmation. Local editing never uploads media. There are no accounts, ads, tracking SDKs, paid APIs, credits, or watermarks.",fontSize=12.sp)
+        Text("Starting remote generation sends your prompt and optional image to this server. Subtitles send selected audio, and optional face restoration sends the processed photo, each after an additional confirmation. Offline editing keeps media on your phone. There are no accounts, ads, tracking SDKs, paid APIs, credits, or watermarks.",fontSize=12.sp)
         Text("Advanced models need powerful hardware; your server may incur hardware and electricity costs. HTTPS with a valid certificate is required. Backend access tokens are encrypted with Android Keystore.",fontSize=12.sp)
         RaisedButton("DISCONNECT & REMOVE TOKEN",{ vm.launch { BackendSecrets(context).save(""); vm.settings.backend(""); url=""; token=""; vm.message.value="Backend disconnected." } })
         PixelText("STORAGE & PRIVACY",size=9,color=LocalConsole.current.accent)
-        Text("Imports and projects live in app-private storage. Exports are created only on your command. Android Photo Picker grants access only to selected files. Uninstalling removes private projects.",fontSize=12.sp)
+        Text("Imports and projects live in app-private storage. Exports are created only on your command. Android Photo Picker grants access only to selected files. Use BACKUP PROJECT in Save Games before uninstalling; restore it with IMPORT PROJECT BACKUP. Backups include your media and captions but exclude server credentials and model weights.",fontSize=12.sp)
         RaisedButton("CLEAR CACHE & UNUSED IMPORTS",vm::clean)
         RaisedButton("REMOVE AI MODEL",{ vm.launch { require(!importing && vm.projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish." }; File(context.filesDir,"models/realesrgan-x4.onnx").delete(); File(context.filesDir,"models/validation.txt").delete(); modelInstalled=false; vm.modelReport.value=""; vm.message.value="Model removed." } })
         PixelText("ABOUT · v${studio.retro.ai.BuildConfig.VERSION_NAME}",size=9,color=LocalConsole.current.accent)

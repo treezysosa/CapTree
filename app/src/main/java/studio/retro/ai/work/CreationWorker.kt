@@ -38,12 +38,34 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                         progress(null,"RENDERING VIDEO...")
                         VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),0,duration)),output,"Original",intensity,emptyList(),recipe.optBoolean("denoise"),recipe.optBoolean("sharpen"),stabilization=profile) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else {
+                        val faceClient=if(recipe.optBoolean("face_restore")) {
+                            val prefs=app.settings.flow.first()
+                            require(recipe.optBoolean("face_upload_confirmed") && prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Confirm processed-photo upload before face restoration." }
+                            BackendClient(prefs.backend,BackendSecrets(applicationContext).read()).also { it.requireCapability("face-restoration") }
+                        } else null
+                        var expectedWidth=0; var expectedHeight=0
                         val source=PhotoEngine.read(inputs.first(),if(tool=="upscale")1024 else 2048)
                         try {
                             val enhanced=PhotoEngine.enhance(source,recipe.optDouble("intensity",0.7).toFloat(),recipe.optBoolean("denoise"),recipe.optBoolean("sharpen",true)) { progress(if(tool=="upscale")it/5 else it,"ENHANCING PIXELS...") }
                             val result=try { if(tool=="upscale")UpscaleEngine.upscale(applicationContext,enhanced,recipe.optInt("scale",2)) { progress(20+it*4/5,"AI SUPER RESOLUTION...") } else enhanced } catch(t:Throwable) { enhanced.recycle(); throw t }
-                            try { output.outputStream().use { require(result.compress(if(jpeg)android.graphics.Bitmap.CompressFormat.JPEG else android.graphics.Bitmap.CompressFormat.PNG,recipe.optInt("quality",92),it)) } } finally { if(result!==enhanced)result.recycle(); enhanced.recycle() }
+                            expectedWidth=result.width; expectedHeight=result.height
+                            try { output.outputStream().use { require(result.compress(if(jpeg && faceClient==null)android.graphics.Bitmap.CompressFormat.JPEG else android.graphics.Bitmap.CompressFormat.PNG,recipe.optInt("quality",92),it)) } } finally { if(result!==enhanced)result.recycle(); enhanced.recycle() }
                         } finally { source.recycle() }
+                        if(faceClient!=null) {
+                            // Local bitmaps are recycled before the remote result is decoded.
+                            val restored=File(applicationContext.cacheDir,"restored-face-$id.png")
+                            try {
+                                faceClient.restoreFace(output,recipe.optDouble("face_strength",0.7).toFloat(),restored) { value,message -> progress(value,message) }
+                                val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true }
+                                android.graphics.BitmapFactory.decodeFile(restored.path,bounds)
+                                require(bounds.outMimeType=="image/png" && bounds.outWidth==expectedWidth && bounds.outHeight==expectedHeight) { "Face server returned invalid image dimensions." }
+                                if(jpeg) {
+                                    val bitmap=PhotoEngine.read(restored,maxOf(expectedWidth,expectedHeight))
+                                    try { output.outputStream().use { require(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG,recipe.optInt("quality",92),it)) } } finally { bitmap.recycle() }
+                                } else restored.copyTo(output,overwrite=true)
+                                recipe.put("face_restoration_applied",true)
+                            } finally { restored.delete() }
+                        }
                     }
                 }
                 "clipper" -> {

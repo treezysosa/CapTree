@@ -27,10 +27,17 @@ import kotlinx.coroutines.withContext
     var opened by remember { mutableStateOf<String?>(null) }
     var rename by remember { mutableStateOf<Project?>(null) }
     var newName by remember { mutableStateOf("") }
+    var backupProject by remember { mutableStateOf<Project?>(null) }
+    val backupPicker=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> val project=backupProject; backupProject=null; if(uri!=null && project!=null)vm.backup(project,uri) }
+    val importPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.importBackup(uri) }
     val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Favorites"->it.favorite; else->true } }
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         PixelText(if(gallery)"PIXEL GALLERY" else "SAVE GAME MENU",color=LocalConsole.current.lcd)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("PROJECTS",{ vm.screen.value="projects" },Modifier.weight(1f)); RaisedButton("GALLERY",{ vm.screen.value="gallery" },Modifier.weight(1f)) }
+        if(!gallery) {
+            RaisedButton("IMPORT PROJECT BACKUP",{ importPicker.launch(arrayOf("application/zip","application/octet-stream","*/*")) },Modifier.fillMaxWidth())
+            Text("Backups contain media and edits. Server settings, credentials and model weights are excluded.",fontSize=11.sp)
+        }
         Choice("FILTER",listOf("All","Photos","Videos","GIFs","Captions","Favorites"),filter) { filter=it }
         if(visible.isEmpty())Text("Your save slots are empty. Press START to create something.",fontSize=14.sp)
         LazyColumn(verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -45,6 +52,7 @@ import kotlinx.coroutines.withContext
                     }
                     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) { TextButton({ vm.resume(p) }) { Text("RESUME",fontSize=10.sp) }; TextButton({ rename=p; newName=p.name }) { Text("RENAME",fontSize=10.sp) }; TextButton({ vm.favorite(p) }) { Text(if(p.favorite)"UNFAVORITE" else "FAVORITE",fontSize=10.sp) } }
                     Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) { TextButton({ vm.duplicate(p) },enabled=p.status !in setOf("queued","processing")) { Text("DUPLICATE",fontSize=10.sp) }; TextButton({ vm.delete(p) }) { Text("DELETE",fontSize=10.sp) }; if(p.status in setOf("queued","processing"))TextButton({ vm.active.value=p.id; vm.screen.value="processing" }) { Text("STATUS",fontSize=10.sp) } }
+                    TextButton({ backupProject=p; backupPicker.launch("RETRO-${p.id}.retro.zip") },enabled=p.status !in setOf("queued","processing")) { Text("BACKUP PROJECT",fontSize=10.sp) }
                 }
             }
         }
@@ -87,6 +95,7 @@ import kotlinx.coroutines.withContext
         RaisedButton("REOPEN TIMELINE WITH SUBTITLES",{ vm.applyTranscript(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
     } else if(comparison=="Linked" && source!=null)VideoComparison(source,p.output) else if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
+    if(runCatching { JSONObject(p.recipe).optBoolean("face_restoration_applied") }.getOrDefault(false))Text("GFPGAN face restoration · self-hosted processing",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.mime!="application/x-subrip" && android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("EXPORT FILE",{ export.launch("RETRO_${p.id}.${File(p.output).extension}") },Modifier.weight(1f)); RaisedButton("SHARE",{ vm.share(p) },Modifier.weight(1f),LocalConsole.current.pink) }

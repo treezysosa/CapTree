@@ -58,5 +58,28 @@ class BackendClientTest {
         } finally { server.shutdown(); audio.delete(); output.delete() }
     }
     @Test(expected=IllegalArgumentException::class) fun cleartextBackendIsRejected() { BackendClient("http://example.com","") }
+    @Test fun faceRestorationUsesOnlyTheProcessedImageAndExplicitStrength():Unit=runBlocking {
+        val (server,http)=server(); val input=File.createTempFile("PRIVATE-PROCESSED-PATH",".png"); val output=File.createTempFile("retro-face-result",".png")
+        try {
+            input.writeBytes(byteArrayOf(9,8,7)); server.enqueue(health("face-restoration"))
+            server.enqueue(MockResponse().setBody("{\"id\":\"face\"}")); server.enqueue(MockResponse().setBody("{\"status\":\"completed\"}"))
+            server.enqueue(MockResponse().setHeader("Content-Type","image/png").setBody(Buffer().write(byteArrayOf(1,2,3))))
+            server.enqueue(MockResponse().setBody("{}"))
+            BackendClient(server.url("/").toString(),"test-token",http).restoreFace(input,0.7f,output) { _,_-> }
+            assertArrayEquals(byteArrayOf(1,2,3),output.readBytes()); server.takeRequest()
+            val upload=server.takeRequest(); val body=upload.body.readUtf8()
+            assertEquals("/v1/face-restorations",upload.path); assertTrue(body.contains("restore-face")); assertTrue(body.contains("strength"))
+            assertTrue(body.contains("filename=\"input.png\"")); assertFalse(body.contains(input.path)); assertFalse(body.contains("PRIVATE-PROCESSED-PATH"))
+            server.takeRequest(); server.takeRequest(); assertEquals("/v1/jobs/face/purge",server.takeRequest().path)
+        } finally { server.shutdown(); input.delete(); output.delete() }
+    }
+    @Test fun faceCapabilityIsCheckedBeforeAnyPhotoUpload():Unit=runBlocking {
+        val (server,http)=server(); val input=File.createTempFile("retro-face",".png"); val output=File.createTempFile("retro-face",".png").apply { delete() }
+        try {
+            input.writeBytes(byteArrayOf(1,2)); server.enqueue(health("face-restoration",false))
+            try { BackendClient(server.url("/").toString(),"",http).restoreFace(input,0.5f,output) { _,_-> }; fail("Unsupported server must reject restoration") } catch(expected:IllegalArgumentException) { assertTrue(expected.message!!.contains("Unsupported")) }
+            assertEquals(1,server.requestCount); assertFalse(output.exists())
+        } finally { server.shutdown(); input.delete(); output.delete() }
+    }
     @Test(expected=IllegalArgumentException::class) fun credentialsInBackendUrlAreRejected() { BackendClient("https://name:secret@example.com","") }
 }

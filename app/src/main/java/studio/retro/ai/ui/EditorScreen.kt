@@ -30,11 +30,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
     var confirmTranscription by remember { mutableStateOf(false) }
+    val confirmFace by vm.faceConfirmation.collectAsStateWithLifecycle()
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText(title,color=LocalConsole.current.lcd,size=10)
-        Text(if(isAI)"REMOTE AI · your self-hosted server" else if(e.tool=="upscale")"LOCAL AI · imported Real-ESRGAN ONNX model" else "OFFLINE · conventional media processing",color=LocalConsole.current.accent,fontSize=11.sp)
+        Text(if(isAI)"REMOTE AI · your self-hosted server" else if(e.faceRestore && !e.video)"LOCAL EDIT + REMOTE FACE AI · upload confirmation required" else if(e.tool=="upscale")"LOCAL AI · imported Real-ESRGAN ONNX model" else "OFFLINE · conventional media processing",color=LocalConsole.current.accent,fontSize=11.sp)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             RaisedButton("UNDO",vm::undo,Modifier.weight(1f),enabled=canUndo && !importing)
             RaisedButton("REDO",vm::redo,Modifier.weight(1f),enabled=canRedo && !importing)
@@ -60,7 +61,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
             "upscale" -> {
                 Choice("UPSCALE",listOf("2×","4×"),"${e.scale}×") { choice -> vm.edit { it.copy(scale=if(choice=="2×")2 else 4) } }
                 Text("Uses a genuine x4 super-resolution model; 2× downsamples its result. Input is decoded to ≤1024 pixels. Output size is checked against available memory.",fontSize=12.sp)
-                Text("Face restoration requires an additional model and is not included in this MVP.",fontSize=12.sp,color=LocalConsole.current.accent)
                 PhotoAdjustments(vm,e)
             }
             "enhance" -> {
@@ -129,6 +129,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
         confirmButton={ TextButton({ confirmTranscription=false; vm.transcribe() }) { Text("SEND AUDIO") } },
         dismissButton={ TextButton({ confirmTranscription=false }) { Text("CANCEL") } }
     )
+    if(confirmFace)AlertDialog(
+        onDismissRequest={ vm.faceConfirmation.value=false },
+        title={ PixelText("SEND PROCESSED PHOTO?",size=9,color=LocalConsole.current.lcd) },
+        text={ Text("Your locally edited${if(e.tool=="upscale")" and upscaled" else ""} photo will be sent to ${prefs.backend.ifBlank { "your configured server" }} for GFPGAN restoration of the central face. This requires the optional CPU face models. The PNG upload is limited to 12 MB. Other editing stays on your phone.") },
+        confirmButton={ TextButton({ vm.faceConfirmation.value=false; vm.create(faceConfirmed=true) }) { Text("SEND PHOTO") } },
+        dismissButton={ TextButton({ vm.faceConfirmation.value=false }) { Text("CANCEL") } }
+    )
 }
 @Composable private fun ClipTimeline(vm:StudioViewModel,e:EditorState) {
     val colors=LocalConsole.current
@@ -158,6 +165,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     if(e.video) {
         RetroToggle("Translation stabilization",e.stabilize) { value -> vm.edit { it.copy(stabilize=value) } }
         Text("For clips up to two minutes. Measures horizontal/vertical camera motion and crops borders. Best with textured, mostly stationary backgrounds; rotation and rolling shutter are not corrected.",fontSize=11.sp,color=LocalConsole.current.accent)
+    } else {
+        RetroToggle("AI face restoration · server",e.faceRestore) { value -> vm.edit { it.copy(faceRestore=value) } }
+        if(e.faceRestore) {
+            RetroSlider("FACE RESTORATION STRENGTH",e.faceStrength,0.1f..1f) { value -> vm.edit("face-strength") { it.copy(faceStrength=value) } }
+            Text("Optional GFPGAN restores the central face after local editing. Requires your self-hosted CPU server and a separate upload confirmation.",fontSize=11.sp,color=LocalConsole.current.accent)
+            RaisedButton("FACE SERVER SETTINGS",{ vm.screen.value="settings" })
+        }
     }
 }
 @Composable private fun TimeFields(vm:StudioViewModel,e:EditorState) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RetroField("START · sec",e.start,{ value -> vm.edit("trim-start") { it.copy(start=value) } },Modifier.weight(1f),number=true); RetroField("END · sec",e.end,{ value -> vm.edit("trim-end") { it.copy(end=value) } },Modifier.weight(1f),number=true) } }

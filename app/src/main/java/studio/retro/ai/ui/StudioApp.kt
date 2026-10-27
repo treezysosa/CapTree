@@ -33,6 +33,8 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
     val message by vm.message.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
     val busyMessage by vm.busyMessage.collectAsStateWithLifecycle()
+    val busyPercent by vm.busyPercent.collectAsStateWithLifecycle()
+    val transferActive by vm.transferActive.collectAsStateWithLifecycle()
     val backendReport by vm.backendReport.collectAsStateWithLifecycle()
     var selected by remember { mutableIntStateOf(0) }
     val haptic=LocalHapticFeedback.current
@@ -65,7 +67,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
                     "settings" -> SettingsScreen(vm)
                     "processing" -> ProcessingScreen(vm)
                 }
-                if(importing) Box(Modifier.fillMaxSize().background(Screen.copy(alpha=0.93f)).clickable(enabled=true,onClick={}),contentAlignment=Alignment.Center) { ConsolePanel { PixelProgress(null,busyMessage) } }
+                if(importing) Box(Modifier.fillMaxSize().background(Screen.copy(alpha=0.93f)).clickable(enabled=true,onClick={}),contentAlignment=Alignment.Center) { ConsolePanel { PixelProgress(busyPercent,busyMessage); if(transferActive)RaisedButton("CANCEL TRANSFER",vm::cancelTransfer,color=c.pink) } }
             }
             ConsoleControls(
                 onMove={ delta -> feedback(); if(route=="home")selected=(selected+delta+6)%6 else if(route=="editor" && editor.tool=="clipper") { if(kotlin.math.abs(delta)==1)vm.seek(editor.playheadMs+delta*33L) else vm.selectClip((editor.selectedClip+if(delta>0)1 else -1).coerceIn(0,(editor.clips.size-1).coerceAtLeast(0))) } },

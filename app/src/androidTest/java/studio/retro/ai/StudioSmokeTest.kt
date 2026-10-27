@@ -16,6 +16,7 @@ import studio.retro.ai.data.Project
 import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import java.util.UUID
 import java.io.File
 import org.junit.Assert.*
@@ -23,6 +24,25 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class StudioSmokeTest {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
+    @Test fun faceRestorationAsksBeforeUploadFromBothTouchAndActionButton() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext(); val previous=runBlocking { app.settings.flow.first() }
+        val photo=File(app.cacheDir,"face-consent-${UUID.randomUUID()}.png")
+        val bitmap=android.graphics.Bitmap.createBitmap(64,48,android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.BLUE) }
+        photo.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bitmap.recycle()
+        lateinit var vm:StudioViewModel; var cleanup:StudioViewModel?=null
+        try {
+            runBlocking { app.settings.backend("https://face-consent.invalid"); app.settings.consent(true) }
+            compose.runOnIdle { vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; cleanup=vm; vm.open("enhance"); vm.editor.value=vm.editor.value.copy(inputs=listOf(photo.path),faceRestore=true) }
+            compose.waitUntil(10000) { vm.prefs.value.remoteConsent && vm.prefs.value.backend=="https://face-consent.invalid" }
+            compose.onNodeWithText("START PROCESSING").performScrollTo().performClick()
+            compose.onNodeWithText("SEND PROCESSED PHOTO?").assertExists(); compose.onNodeWithText("SEND PHOTO").assertExists()
+            compose.onNodeWithText("CANCEL").performClick()
+            compose.onNodeWithText("A").performClick()
+            compose.onNodeWithText("SEND PROCESSED PHOTO?").assertExists()
+            compose.onNodeWithText("CANCEL").performClick()
+            compose.runOnIdle { assertNull(vm.active.value); assertEquals("editor",vm.screen.value) }
+        } finally { compose.runOnIdle { cleanup?.back() }; photo.delete(); runBlocking { app.settings.backend(previous.backend); app.settings.consent(previous.remoteConsent) } }
+    }
     @Test fun homeCartridgeOpensRealOfflineEditor() {
         compose.onNodeWithText("AUTO\nENHANCE").performScrollTo().performClick()
         compose.onNodeWithText("IMPORT PHOTOS").assertExists()
