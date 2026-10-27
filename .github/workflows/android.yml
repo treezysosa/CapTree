@@ -65,8 +65,10 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          ram-size: 2048M
+          heap-size: 256M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 2048
           script: bash tools/run_device_tests.sh
       - uses: actions/upload-artifact@v4
         if: always()
