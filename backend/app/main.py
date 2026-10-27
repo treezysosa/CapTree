@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 import uuid
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -16,15 +17,19 @@ from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
-from .contracts import Generation
+from .contracts import Generation, Transcription
 from .inference import GenerationCancelled, InferenceEngine
+from .transcription import TranscriptionEngine
+from .capabilities import features, operation_feature
 
 ROOT = Path(os.environ.get("RETRO_OUTPUT_DIR", "backend/outputs")).resolve()
 JOBS = {}
 LOCK = threading.RLock()
 POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="retro-inference")
 ENGINE = InferenceEngine()
+TRANSCRIBER = TranscriptionEngine()
 MAX_UPLOAD = 12 * 1024 * 1024
+MAX_AUDIO = 64 * 1024 * 1024
 Image.MAX_IMAGE_PIXELS = 20_000_000
 
 
@@ -57,7 +62,7 @@ def run_job(job, request, image):
         if job.cancel.is_set():
             raise GenerationCancelled()
         job.status = "processing"
-        job.output, job.mime = ENGINE.run(request, image, job)
+        job.output, job.mime = (TRANSCRIBER if isinstance(request, Transcription) else ENGINE).run(request, image, job)
         if job.cancel.is_set():
             raise GenerationCancelled()
         job.status, job.stage, job.progress = "completed", "Ready", 100
@@ -106,13 +111,13 @@ async def lifespan(app):
             job.cancel.set()
 
 
-app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/v1/health", dependencies=[Depends(auth)])
 def health():
-    # Capabilities describe configured pipelines. Loading/inference failures remain explicit.
-    return {"status": "online", "capabilities": ["text-to-image", "image-to-image", "text-to-video", "image-to-video", "text-to-gif"], "models": {"image": os.environ.get("RETRO_IMAGE_MODEL", "stable-diffusion-v1-5/stable-diffusion-v1-5"), "video": os.environ.get("RETRO_VIDEO_MODEL", "THUDM/CogVideoX-2b")}, "progress": "actual diffusion steps; indeterminate during loading/encoding"}
+    status = features(getattr(ENGINE, "kind", None), getattr(TRANSCRIBER, "model", None) is not None)
+    return {"status": "online", "api_version": 2, "capabilities": [item["id"] for item in status if item["supported"]], "features": status, "progress": "actual model steps or transcribed audio time; indeterminate during loading/encoding"}
 
 
 @app.post("/v1/jobs", status_code=202, dependencies=[Depends(auth)])
@@ -123,6 +128,10 @@ async def create(payload: str = Form(...), image: UploadFile | None = File(defau
         request = Generation.model_validate_json(payload)
     except (ValidationError, ValueError):
         raise HTTPException(422, "Invalid generation payload.")
+    # Check hardware before accepting a media upload into a generation job.
+    capability = next(item for item in features(getattr(ENGINE, "kind", None)) if item["id"] == operation_feature(request, image is not None))
+    if not capability["supported"]:
+        raise HTTPException(503, capability["reason"])
     with LOCK:
         if sum(j.status in ("queued", "processing") for j in JOBS.values()) >= 3 or len(JOBS) >= 100:
             raise HTTPException(429, "Server queue is full. Purge old jobs or wait for processing.")
@@ -161,6 +170,55 @@ async def create(payload: str = Form(...), image: UploadFile | None = File(defau
     finally:
         if image:
             await image.close()
+
+
+@app.post("/v1/transcriptions", status_code=202, dependencies=[Depends(auth)])
+async def transcribe(payload: str = Form(default='{"tool":"transcribe"}'), audio: UploadFile = File(...)):
+    try:
+        if len(payload) > 4096:
+            raise ValueError()
+        request = Transcription.model_validate_json(payload)
+    except (ValueError, ValidationError):
+        raise HTTPException(422, "Invalid transcription settings.")
+    capability = next(item for item in features() if item["id"] == "transcription")
+    if not capability["supported"]:
+        raise HTTPException(503, capability["reason"])
+    with LOCK:
+        if sum(j.status in ("queued", "processing") for j in JOBS.values()) >= 3 or len(JOBS) >= 100:
+            raise HTTPException(429, "Server queue is full.")
+        job_id = str(uuid.uuid4())
+        directory = ROOT / job_id
+        directory.mkdir(parents=True)
+        job = Job(job_id, directory)
+        JOBS[job_id] = job
+    path = directory / "audio.wav"
+    try:
+        count = 0
+        with path.open("wb") as sink:
+            while chunk := await audio.read(65536):
+                count += len(chunk)
+                if count > MAX_AUDIO:
+                    raise HTTPException(413, "Selected audio exceeds 64 MB.")
+                sink.write(chunk)
+        try:
+            with wave.open(str(path), "rb") as decoded:
+                duration = decoded.getnframes() / max(decoded.getframerate(), 1)
+                if decoded.getsampwidth() != 2 or not 1 <= decoded.getnchannels() <= 8 or not 8000 <= decoded.getframerate() <= 192000 or not 0 < duration <= 600:
+                    raise ValueError()
+                expected = decoded.getnframes() * decoded.getnchannels() * 2
+                if len(decoded.readframes(decoded.getnframes())) != expected:
+                    raise ValueError()
+        except (wave.Error, EOFError, ValueError):
+            raise HTTPException(422, "Upload valid 16-bit PCM WAV audio up to ten minutes.")
+        POOL.submit(run_job, job, request, path)
+        return {"id": job_id}
+    except BaseException:
+        with LOCK:
+            JOBS.pop(job_id, None)
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    finally:
+        await audio.close()
 
 
 def get_job(job_id):

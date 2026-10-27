@@ -14,6 +14,8 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setenv("RETRO_API_TOKEN", "test-token-only-abcdefghijklmnopqrstuvwxyz")
     module = importlib.import_module("backend.app.main")
     monkeypatch.setattr(module, "ROOT", tmp_path)
+    from backend.app.capabilities import features
+    monkeypatch.setattr(module, "features", lambda *args, **kwargs: features(installed={name: True for name in ("torch", "diffusers", "transformers", "faster_whisper")}, cuda=True))
     module.JOBS.clear()
     with TestClient(module.app) as client:
         client.headers["Authorization"] = "Bearer test-token-only-abcdefghijklmnopqrstuvwxyz"

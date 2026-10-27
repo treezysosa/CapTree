@@ -15,3 +15,8 @@ class Generation(BaseModel):
     @property
     def dimensions(self) -> tuple[int, int]:
         return {"1:1": (512, 512), "9:16": (432, 768), "16:9": (768, 432)}[self.aspect]
+
+
+class Transcription(BaseModel):
+    tool: Literal["transcribe"] = "transcribe"
+    language: str = Field(default="auto", pattern=r"^(auto|[a-z]{2,3})$")
