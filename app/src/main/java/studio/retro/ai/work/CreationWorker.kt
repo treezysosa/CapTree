@@ -72,6 +72,8 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
             output.delete(); dao.status(id,"failed",e.message?.take(500) ?: "Processing failed."); Result.failure()
         } catch(e:OutOfMemoryError) {
             output.delete(); dao.status(id,"failed","Not enough memory. Use smaller input media."); Result.failure()
+        } catch(e:LinkageError) {
+            output.delete(); dao.status(id,"failed","Unsupported device: the required native AI or media library could not load for this CPU/Android version."); Result.failure()
         }
     }
 }

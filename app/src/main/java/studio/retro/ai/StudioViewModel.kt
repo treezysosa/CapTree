@@ -57,7 +57,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun open(tool:String) { editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
     fun back() { screen.value="home" }
     fun edit(change:(EditorState)->EditorState) { editor.value=change(editor.value) }
-    fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } } }
+    fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } catch(e:LinkageError) { message.value="Unsupported device: this native library cannot load on your CPU/Android version." } } }
     fun import(uris:List<Uri>,video:Boolean) = launch {
         importing.value=true
         try {
@@ -118,7 +118,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         runCatching { val uri=FileProvider.getUriForFile(app,"${app.packageName}.files",File(project.output)); app.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(project.mime).putExtra(Intent.EXTRA_STREAM,uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"Share creation").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { message.value=it.message.orEmpty() }
     }
     fun saveGallery(project:Project) = launch {
-        require(Build.VERSION.SDK_INT>=29) { "On Android 8–9, use EXPORT FILE to choose a folder." }
+        if(Build.VERSION.SDK_INT<29)error("On Android 8–9, use EXPORT FILE to choose a folder.")
         withContext(Dispatchers.IO) {
             val collection=if(project.mime.startsWith("video"))MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             val values=android.content.ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME,"RETRO_${project.id}.${File(project.output).extension}"); put(MediaStore.MediaColumns.MIME_TYPE,project.mime); put(MediaStore.MediaColumns.RELATIVE_PATH,if(project.mime.startsWith("video"))"Movies/RetroAiStudio" else "Pictures/RetroAiStudio"); put(MediaStore.MediaColumns.IS_PENDING,1) }

@@ -43,7 +43,9 @@ import java.io.File
 @Suppress("DEPRECATION")
 private class GifView(context:Context,path:String):View(context) {
     private val movie=File(path).inputStream().use { Movie.decodeStream(it) }
-    var playing=true; private var position=0L; private var last=android.os.SystemClock.uptimeMillis()
+    private var position=0L; private var last=android.os.SystemClock.uptimeMillis()
+    var playing=true
+        set(value) { if(field!=value) { field=value; last=android.os.SystemClock.uptimeMillis() }; invalidate() }
     override fun onDraw(canvas:Canvas) {
         super.onDraw(canvas); val m=movie ?: return
         val now=android.os.SystemClock.uptimeMillis(); if(playing)position+=now-last; last=now

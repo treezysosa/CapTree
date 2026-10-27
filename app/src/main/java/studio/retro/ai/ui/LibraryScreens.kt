@@ -82,6 +82,6 @@ import java.util.UUID
     MediaPreview(if(before && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
-    RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
+    if(android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("EXPORT FILE",{ export.launch("RETRO_${p.id}.${File(p.output).extension}") },Modifier.weight(1f)); RaisedButton("SHARE",{ vm.share(p) },Modifier.weight(1f),LocalConsole.current.pink) }
 }
