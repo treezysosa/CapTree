@@ -1,0 +1,58 @@
+name: Validate pretrained AI models
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/model-validation.yml'
+      - 'tools/export_realesrgan.py'
+      - 'tools/validate_real_models.py'
+      - 'backend/app/inference.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pretrained-models-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  realesrgan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install 'numpy<2' basicsr==1.4.2 onnx==1.16.2 onnxruntime==1.19.2 Pillow==11.2.1
+      - name: Export and verify official Real-ESRGAN weights
+        run: |
+          mkdir -p model-validation/realesrgan
+          curl --fail --location --retry 3 --max-time 300 https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -o model-validation/RealESRGAN_x4plus.pth
+          python tools/export_realesrgan.py model-validation/RealESRGAN_x4plus.pth model-validation/realesrgan/realesrgan-x4.onnx
+          python tools/validate_real_models.py realesrgan --model model-validation/realesrgan/realesrgan-x4.onnx --weights model-validation/RealESRGAN_x4plus.pth --output model-validation/realesrgan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-realesrgan-test-model
+          path: model-validation/realesrgan/
+          retention-days: 14
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r backend/requirements.txt
+      - name: Run real Stable Diffusion inference on CPU
+        run: python tools/validate_real_models.py image --output model-validation/image
+        env:
+          PYTHONPATH: .
+          HF_HUB_DISABLE_TELEMETRY: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-image-inference-validation
+          path: model-validation/image/
+          retention-days: 14
