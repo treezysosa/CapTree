@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from .contracts import Generation, Transcription
 from .inference import GenerationCancelled, InferenceEngine
-from .transcription import TranscriptionEngine
+from .transcription import TranscriptionEngine, NoSpeechDetected
 from .capabilities import features, operation_feature
 
 ROOT = Path(os.environ.get("RETRO_OUTPUT_DIR", "backend/outputs")).resolve()
@@ -68,6 +68,8 @@ def run_job(job, request, image):
         job.status, job.stage, job.progress = "completed", "Ready", 100
     except GenerationCancelled:
         job.status, job.stage = "cancelled", "Cancelled"
+    except NoSpeechDetected:
+        job.status, job.error = "failed", "No speech was detected in the selected audio. Select a clip that contains speech."
     except Exception as error:
         # Avoid leaking filesystem paths, request data or server credentials.
         job.status, job.error = "failed", f"{type(error).__name__}: model inference failed. Check model installation, license access, and server RAM/VRAM."

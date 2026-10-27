@@ -21,6 +21,24 @@ class StudioSmokeTest {
         compose.onNodeWithText("IMPORT PHOTOS").assertExists()
         compose.onNodeWithText("START PROCESSING").performScrollTo().assertExists()
     }
+    @Test fun automaticSubtitlesAskBeforeSendingSelectedAudio() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext()
+        val file=File(app.cacheDir,"ui-consent.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("fixture.mp4").use { source -> file.outputStream().use { source.copyTo(it) } }
+        lateinit var vm:StudioViewModel
+        try {
+            compose.runOnIdle {
+                vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]
+                vm.open("clipper")
+                vm.editor.value=vm.editor.value.copy(inputs=listOf(file.path),video=true,start="0",end="2.4",clips=listOf(ClipEdit(file.path,0,2400,2400)))
+            }
+            compose.onNodeWithText("AI AUTO SUBTITLES · SERVER").performScrollTo().performClick()
+            compose.onNodeWithText("SEND SELECTED AUDIO?").assertExists()
+            compose.onNodeWithText("SEND AUDIO").assertExists()
+            compose.onNodeWithText("CANCEL").performClick()
+            compose.runOnIdle { assertEquals("editor",vm.screen.value); assertTrue(vm.projects.value.none { it.tool=="transcribe" }) }
+        } finally { compose.runOnIdle { vm.back() }; file.delete() }
+    }
     @Test fun timelineSplitAndMoveButtonsChangeTheActualEditOrder() {
         val app:StudioApplication=ApplicationProvider.getApplicationContext()
         val file=File(app.cacheDir,"ui-timeline.mp4")

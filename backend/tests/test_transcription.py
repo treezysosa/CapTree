@@ -5,6 +5,8 @@ import wave
 import pytest
 from fastapi.testclient import TestClient
 from backend.app.capabilities import features
+from backend.app.contracts import Transcription
+from backend.app.transcription import NoSpeechDetected
 
 
 def wav():
@@ -43,3 +45,18 @@ def test_audio_upload_job_result_and_cleanup(tmp_path, monkeypatch):
         client.delete(f"/v1/jobs/{job_id}/purge")
         assert not (tmp_path / job_id).exists()
     module.JOBS.clear()
+
+
+def test_no_speech_has_an_actionable_error_and_removes_input(tmp_path, monkeypatch):
+    module = importlib.import_module("backend.app.main")
+    class EmptySpeechEngine:
+        def run(self, request, audio, job):
+            raise NoSpeechDetected()
+    monkeypatch.setattr(module, "TRANSCRIBER", EmptySpeechEngine())
+    audio = tmp_path / "selected.wav"
+    audio.write_bytes(wav())
+    job = module.Job("no-speech", tmp_path)
+    module.run_job(job, Transcription(), audio)
+    assert job.status == "failed"
+    assert "No speech was detected" in job.error
+    assert not audio.exists()

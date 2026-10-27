@@ -4,6 +4,9 @@ Import the result in Android's SRT caption editor. --format legacy preserves
 the original milliseconds|caption output.
 """
 import argparse
+import os
+
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 
 def timestamp(milliseconds):

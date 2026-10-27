@@ -25,7 +25,7 @@ Default pipelines:
 
 `RETRO_IMAGE_MODEL`, `RETRO_VIDEO_MODEL`, and `RETRO_I2V_MODEL` override the local directory or compatible Hugging Face model ID. They must match the pipeline class; arbitrary architectures are not interchangeable. Download and accept any model license/access requirements before starting mobile generation. Set `HF_HUB_OFFLINE=1` when running from predownloaded local paths. Models are loaded lazily and cached one at a time; switch between large models only when you have enough host memory. The default safety checker is preserved.
 
-Preload a model by making a generation request on the server before mobile use; initial downloads can exceed the mobile eight-minute timeout. A completed `/v1/health` call confirms the API/token, not hardware compatibility or successful inference.
+Preload a model by making a generation request on the server before mobile use; initial downloads can exceed the mobile eight-minute timeout. Backend v0.3 reports `api_version: 2` and a per-feature `features` report. `unsupported` identifies missing packages or CUDA hardware; `not_loaded` means prerequisites were detected but weights have not been loaded; `ready` means the pipeline is loaded. A loaded model may still fail from insufficient resources. Android v0.3 preflights the requested feature before uploading. Upgrade an older backend before using the new app.
 
 ## Job protocol
 
@@ -44,8 +44,16 @@ No production route returns placeholder media. Missing packages/models, unsuppor
 ## Optional transcription
 
 ```sh
-pip install faster-whisper==1.1.1
+pip install -r backend/requirements-speech.txt
 python backend/transcribe.py movie.mp4 --model small > captions.srt
 ```
 
 Use AI Clipper → Import SRT to load the generated file. `--format legacy` outputs the original `milliseconds|caption` events for pasting. Times are relative to exported time zero; adjust them when trimming or reordering source clips.
+
+## Automatic subtitles from Android
+
+Set `RETRO_WHISPER_MODEL=tiny` (default, fast CPU) or a compatible faster-whisper model/local path. `pip install -r backend/requirements.txt` includes the speech dependencies; for a CPU speech-only server, install `backend/requirements-test.txt` plus `backend/requirements-speech.txt`. No CUDA GPU is needed for speech. The first job downloads model weights unless a local path/cache is used.
+
+In AI Clipper, select and trim a block, choose the speech language, and press **AI Auto Subtitles · Server**. Confirm **Send Audio**. The app decodes the selected audio range locally, uploads only its PCM WAV to `POST /v1/transcriptions`, and polls the authenticated job API. The result is a real SRT file. Open the completed save and choose **Reopen Timeline With Subtitles** to replace captions in the selected output range while preserving captions elsewhere. It uses the saved timeline snapshot; review timing after later edits.
+
+The multipart transcription endpoint accepts `payload={"tool":"transcribe","language":"auto"}` and an `audio` WAV field. Uploads are limited to 16-bit PCM, 1–8 channels, 8–192 kHz, ten minutes, and 64 MB. Audio files are deleted after inference and on purge. Cancellation is cooperative between speech segments; model loading and individual inference calls may take time. No-speech results produce a clear failed-job message. Default tiny-model captions need manual correction.
