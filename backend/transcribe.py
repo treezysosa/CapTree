@@ -1,4 +1,4 @@
-"""Optional local transcription: pip install faster-whisper==1.1.1
+"""Optional local transcription: pip install -r backend/requirements-speech.txt
 python backend/transcribe.py input.mp4 > captions.srt
 Import the result in Android's SRT caption editor. --format legacy preserves
 the original milliseconds|caption output.

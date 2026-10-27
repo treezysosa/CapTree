@@ -8,4 +8,4 @@ safetensors==0.5.3
 sentencepiece==0.2.0
 imageio==2.37.0
 imageio-ffmpeg==0.6.0
-faster-whisper==1.1.1
+-r requirements-speech.txt

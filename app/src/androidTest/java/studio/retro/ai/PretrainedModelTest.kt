@@ -20,6 +20,7 @@ class PretrainedModelTest {
     @Test fun realEsrganMatchesTheIndependentCpuGoldenTile():Unit=runBlocking {
         val assets=InstrumentationRegistry.getInstrumentation().context.assets
         val available=assets.list("validation")?.contains("realesrgan-x4.onnx")==true
+        if(InstrumentationRegistry.getArguments().getString("class").orEmpty().contains("PretrainedModelTest"))assertTrue("The dedicated model-validation run must supply real weights.",available)
         assumeTrue("Real pretrained weights are supplied by the model-validation workflow, not bundled in the APK.",available)
         val app:StudioApplication=ApplicationProvider.getApplicationContext()
         val model=File(app.filesDir,"models/realesrgan-x4.onnx").apply { parentFile!!.mkdirs() }

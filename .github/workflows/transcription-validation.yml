@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
       - run: sudo apt-get update -qq
       - run: sudo apt-get install -y espeak-ng
-      - run: pip install -r backend/requirements-test.txt faster-whisper==1.1.1
+      - run: pip install -r backend/requirements-test.txt -r backend/requirements-speech.txt
       - run: python tools/validate_transcription_model.py
         env:
           PYTHONPATH: .
