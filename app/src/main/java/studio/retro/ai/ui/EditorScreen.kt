@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -18,6 +20,8 @@ import java.io.File
 @Composable fun EditorScreen(vm:StudioViewModel,e:EditorState) {
     val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(40)) { if(it.isNotEmpty())vm.import(it,false) }
     val videoPicker=rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(12)) { if(it.isNotEmpty())vm.import(it,true) }
+    val subtitlePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { if(it!=null)vm.importCaptions(it) }
+    val subtitleExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-subrip")) { if(it!=null)vm.exportCaptions(it) }
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
@@ -30,11 +34,15 @@ import java.io.File
             }
         }
         if(e.inputs.isNotEmpty()) {
-            MediaPreview(e.inputs.first(),if(e.video)"video/mp4" else "image/png")
+            val clip=e.clips.getOrNull(e.selectedClip)
+            if(e.tool=="clipper" && clip!=null) {
+                val valid=clip.endMs>clip.startMs && clip.startMs>=0
+                MediaPreview(clip.path,"video/mp4",seekPositionMs=e.previewRequestMs,rangeStartMs=if(valid)clip.startMs else 0,rangeEndMs=if(valid)clip.endMs else null,onPositionChanged=vm::previewPosition)
+            } else MediaPreview(e.inputs.first(),if(e.video)"video/mp4" else "image/png")
             Text("${e.inputs.size} file(s) · ${if(e.video)"video" else "images"}",color=Cream,fontSize=12.sp)
-            LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.inputs.size) { i -> Text("▣ ${i+1}",Modifier.background(LocalConsole.current.shell).padding(10.dp),color=Cream) } }
+            if(e.tool!="clipper")LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.inputs.size) { i -> Text("▣ ${i+1}",Modifier.background(LocalConsole.current.shell).padding(10.dp),color=Cream) } }
             if(e.inputs.size>1 && e.tool !in setOf("clipper","gif"))Text("This tool processes the first file.",color=LocalConsole.current.accent,fontSize=11.sp)
-            TextButton({ vm.edit { it.copy(inputs=emptyList(),video=false) } }) { Text("CLEAR INPUTS") }
+            TextButton({ vm.edit { it.copy(inputs=emptyList(),video=false,clips=emptyList(),selectedClip=0,suggestions=emptyList()) } }) { Text("CLEAR INPUTS") }
         }
         when(e.tool) {
             "upscale" -> {
@@ -44,18 +52,21 @@ import java.io.File
                 PhotoAdjustments(vm,e)
             }
             "enhance" -> {
-                Text(if(e.video)"GPU brightness, contrast, and saturation correction. Video denoising, sharpening, stabilization, and face restoration are not supported in this release." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
+                Text(if(e.video)"GPU brightness, contrast, saturation, edge-aware spatial denoising, and sharpening. These are traditional algorithms. Stabilization and face restoration require additional implementations." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
                 PhotoAdjustments(vm,e)
             }
             "clipper" -> {
-                Text("The first clip uses the trim range. Additional imports are merged in order with their original audio.",fontSize=12.sp)
+                ClipTimeline(vm,e)
+                Text("Each block has its own trim. Export merges the visible order with synchronized audio. Left/right D-pad seeks by 1/30 second; up/down selects a block.",fontSize=12.sp)
                 TimeFields(vm,e)
                 Choice("CROP / RESIZE",listOf("Original","9:16","1:1","16:9"),e.aspect) { value -> vm.edit { it.copy(aspect=value) } }
-                RaisedButton("SPLIT RANGE INTO TWO DRAFTS",vm::split)
+                RaisedButton("SPLIT AT PLAYHEAD",vm::split,enabled=e.clips.isNotEmpty())
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("SCENE CUTS",{ vm.analyze(false) },Modifier.weight(1f)); RaisedButton("QUIET AUDIO",{ vm.analyze(true) },Modifier.weight(1f)) }
-                Text("Scene and audio suggestions use measured histogram changes and PCM energy. D-pad left/right adjusts trim start by 1/30 second.",fontSize=11.sp,color=LocalConsole.current.accent)
-                RetroField("CAPTIONS · milliseconds | caption, one per line",e.captions,{ value -> vm.edit { it.copy(captions=value) } },multiline=true)
-                Text("Caption times start at exported time 0. Add a blank caption (e.g. 3000|) to clear text. Optional speech transcription is available through the backend CLI; paste its caption output here.",fontSize=11.sp)
+                if(e.suggestions.isNotEmpty())LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.suggestions.size) { index -> TextButton({ vm.seek(e.suggestions[index]) }) { Text("${e.suggestions[index]/1000.0}s") } } }
+                Text("Suggestions measure scene changes and quiet audio; they do not classify semantic highlights.",fontSize=11.sp,color=LocalConsole.current.accent)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
+                RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit { it.copy(captions=value) } },multiline=true)
+                Text("Caption times refer to the exported timeline. Reordering/trimming clips does not retime captions automatically. Export validates subtitle syntax. The optional faster-whisper CLI can generate SRT input from speech.",fontSize=11.sp)
             }
             "gif" -> {
                 Choice("OUTPUT",listOf("GIF","MP4"),e.format) { value -> vm.edit { it.copy(format=value) } }
@@ -90,9 +101,31 @@ import java.io.File
         RaisedButton("SAVE UNFINISHED PROJECT",{ vm.create(true) },Modifier.fillMaxWidth())
     }
 }
+@Composable private fun ClipTimeline(vm:StudioViewModel,e:EditorState) {
+    val colors=LocalConsole.current
+    PixelText("CLIP TIMELINE · ${"%.2f".format(e.clips.sumOf { it.durationMs }/1000.0)}s",size=8,color=colors.accent)
+    LazyRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        items(e.clips.size,key={e.clips[it].id}) { index ->
+            val clip=e.clips[index]
+            Column(Modifier.widthIn(min=106.dp,max=180.dp).background(if(index==e.selectedClip)colors.shell else Navy,RoundedCornerShape(5.dp)).border(2.dp,if(index==e.selectedClip)colors.lcd else colors.accent,RoundedCornerShape(5.dp)).clickable { vm.selectClip(index) }.padding(10.dp)) {
+                PixelText("CLIP ${index+1}",size=8)
+                Text("${"%.2f".format(clip.startMs/1000.0)}–${"%.2f".format(clip.endMs/1000.0)}s",fontSize=11.sp)
+            }
+        }
+    }
+    e.clips.getOrNull(e.selectedClip)?.let { clip ->
+        Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            RaisedButton("← MOVE",{ vm.moveClip(-1) },Modifier.weight(1f),enabled=e.selectedClip>0)
+            RaisedButton("MOVE →",{ vm.moveClip(1) },Modifier.weight(1f),enabled=e.selectedClip<e.clips.lastIndex)
+            RaisedButton("REMOVE",vm::removeClip,Modifier.weight(1f),colors.pink)
+        }
+        if(clip.durationMs>0)RetroSlider("PLAYHEAD · ${"%.3f".format(e.playheadMs/1000.0)}s",e.playheadMs.toFloat().coerceIn(clip.startMs.toFloat(),clip.endMs.toFloat()),clip.startMs.toFloat()..clip.endMs.toFloat()) { vm.seek(it.toLong()) }
+    }
+}
 @Composable private fun PhotoAdjustments(vm:StudioViewModel,e:EditorState) {
     RetroSlider("ENHANCEMENT INTENSITY · ${(e.intensity*100).toInt()}%",e.intensity,0f..1f) { value -> vm.edit { it.copy(intensity=value) } }
-    if(!e.video) { RetroToggle("Noise reduction",e.denoise) { value -> vm.edit { it.copy(denoise=value) } }; RetroToggle("Sharpening",e.sharpen) { value -> vm.edit { it.copy(sharpen=value) } } }
+    RetroToggle(if(e.video)"Spatial video noise reduction" else "Noise reduction",e.denoise) { value -> vm.edit { it.copy(denoise=value) } }
+    RetroToggle("Sharpening",e.sharpen) { value -> vm.edit { it.copy(sharpen=value) } }
 }
 @Composable private fun TimeFields(vm:StudioViewModel,e:EditorState) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RetroField("START · sec",e.start,{ value -> vm.edit { it.copy(start=value) } },Modifier.weight(1f),number=true); RetroField("END · sec",e.end,{ value -> vm.edit { it.copy(end=value) } },Modifier.weight(1f),number=true) } }
 @Composable fun RetroField(label:String,value:String,onChange:(String)->Unit,modifier:Modifier=Modifier,multiline:Boolean=false,number:Boolean=false) { OutlinedTextField(value,onChange,modifier.fillMaxWidth(),label={ Text(label,fontSize=11.sp) },singleLine=!multiline,minLines=if(multiline)3 else 1,keyboardOptions=KeyboardOptions(keyboardType=if(number)KeyboardType.Decimal else KeyboardType.Text)) }

@@ -74,12 +74,12 @@ import java.util.UUID
 }
 @Composable private fun ResultActions(vm:StudioViewModel,p:Project) {
     val export=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(p.mime.ifBlank { "application/octet-stream" })) { uri -> if(uri!=null)vm.export(p,uri) }
-    var before by remember(p.id) { mutableStateOf(false) }
+    var comparison by remember(p.id) { mutableStateOf("After") }
     val source=remember(p.recipe) { runCatching { JSONObject(p.recipe).optJSONArray("inputs")?.optString(0) }.getOrNull() }
     if(p.tool in setOf("enhance","upscale") && !source.isNullOrBlank()) {
-        Choice("COMPARISON",listOf("Before","After"),if(before)"Before" else "After") { before=it=="Before" }
+        Choice("COMPARISON",if(p.mime.startsWith("video/"))listOf("Before","After") else listOf("Before","After","Wipe"),comparison) { comparison=it }
     }
-    MediaPreview(if(before && source!=null)source else p.output,p.mime)
+    if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())

@@ -19,14 +19,23 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import coil.compose.AsyncImage
 import java.io.File
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
-@Composable fun MediaPreview(path:String,mime:String,modifier:Modifier=Modifier) {
+@Composable fun MediaPreview(path:String,mime:String,modifier:Modifier=Modifier,seekPositionMs:Long?=null,rangeStartMs:Long=0,rangeEndMs:Long?=null,onPositionChanged:((Long)->Unit)?=null) {
     val context=LocalContext.current
     if(mime.startsWith("video")) {
-        val player=remember(path) { ExoPlayer.Builder(context).build().apply { setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(File(path)))); prepare() } }
+        val player=remember(path,rangeStartMs,rangeEndMs) { ExoPlayer.Builder(context).build().apply {
+            val item=MediaItem.Builder().setUri(android.net.Uri.fromFile(File(path)))
+            if(rangeEndMs!=null && rangeEndMs>rangeStartMs)item.setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(rangeStartMs).setEndPositionMs(rangeEndMs).build())
+            setMediaItem(item.build()); prepare()
+        } }
+        LaunchedEffect(player,seekPositionMs) { seekPositionMs?.let { player.seekTo((it-rangeStartMs).coerceAtLeast(0)) } }
+        val positionCallback by rememberUpdatedState(onPositionChanged)
+        LaunchedEffect(player) { if(positionCallback!=null)while(isActive) { positionCallback?.invoke(player.currentPosition+rangeStartMs); delay(100) } }
         DisposableEffect(player) { onDispose { player.release() } }
         AndroidView(factory={ PlayerView(it).apply { this.player=player } },update={ it.player=player },modifier=modifier.fillMaxWidth().height(230.dp))
     } else if(mime=="image/gif") {

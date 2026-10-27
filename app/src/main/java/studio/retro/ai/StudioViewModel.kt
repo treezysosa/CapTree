@@ -25,7 +25,9 @@ data class EditorState(
     val loop:Boolean=true, val caption:String="", val sticker:String="", val format:String="GIF",
     val scale:Int=2, val intensity:Float=0.7f, val denoise:Boolean=true, val sharpen:Boolean=true,
     val prompt:String="", val negative:String="", val style:String="Cinematic", val aspect:String="1:1",
-    val seed:String="", val duration:Int=3, val motion:Float=0.5f, val captions:String=""
+    val seed:String="", val duration:Int=3, val motion:Float=0.5f, val captions:String="",
+    val clips:List<ClipEdit> = emptyList(), val selectedClip:Int=0, val playheadMs:Long=0,
+    val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -34,11 +36,14 @@ data class EditorState(
         put("scale",scale); put("intensity",intensity.toDouble()); put("denoise",denoise); put("sharpen",sharpen)
         put("prompt",prompt); put("negative",negative); put("style",style); put("aspect",aspect); put("seed",seed.toLongOrNull() ?: -1L); put("duration",duration); put("motion",motion.toDouble()); put("captions",captions)
         put("backend",prefs.backend); put("consent",prefs.remoteConsent); put("quality",prefs.quality)
+        put("clips",JSONArray().apply { clips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id) }) } })
     }
     companion object {
         fun restore(tool:String,json:String):EditorState {
             val r=JSONObject(json); val a=r.optJSONArray("inputs") ?: JSONArray()
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${r.optLong("start")/1000.0}","${r.optLong("end",3000)/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"))
+            val timeline=r.optJSONArray("clips")
+            val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),c.optString("id",UUID.randomUUID().toString())) }
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${r.optLong("start")/1000.0}","${r.optLong("end",3000)/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,playheadMs=clips.firstOrNull()?.startMs ?: 0)
         }
     }
 }
@@ -56,7 +61,15 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val work=WorkManager.getInstance(app)
     fun open(tool:String) { editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
     fun back() { screen.value="home" }
-    fun edit(change:(EditorState)->EditorState) { editor.value=change(editor.value) }
+    fun edit(change:(EditorState)->EditorState) {
+        val old=editor.value; var next=change(old)
+        if(next.tool=="clipper" && next.clips.isNotEmpty() && (next.start!=old.start || next.end!=old.end)) {
+            val index=next.selectedClip.coerceIn(next.clips.indices)
+            val start=next.start.toDoubleOrNull(); val end=next.end.toDoubleOrNull()
+            if(start!=null && end!=null)next=next.copy(clips=next.clips.mapIndexed { i,c -> if(i==index)c.copy(startMs=(start*1000).toLong(),endMs=(end*1000).toLong()) else c })
+        }
+        editor.value=next
+    }
     fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } catch(e:LinkageError) { message.value="Unsupported device: this native library cannot load on your CPU/Android version." } } }
     fun import(uris:List<Uri>,video:Boolean) = launch {
         importing.value=true
@@ -72,8 +85,10 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
                     }; copied
                 } catch(t:Throwable) { copied.forEach { it.delete() }; throw t }
             }
-            val duration=if(video)withContext(Dispatchers.IO) { VideoEngine.duration(files.first())/1000.0 } else 3.0
-            edit { it.copy(inputs=files.map(File::getPath),video=video,end="${minOf(duration,if(it.tool=="gif")5.0 else duration)}") }
+            val durations=if(video)withContext(Dispatchers.IO) { files.map { VideoEngine.duration(it) } } else emptyList()
+            val duration=durations.firstOrNull()?.div(1000.0) ?: 3.0
+            val clips=if(video && editor.value.tool=="clipper")files.mapIndexed { i,f -> ClipEdit(f.path,0,durations[i],durations[i]) } else emptyList()
+            editor.value=editor.value.copy(inputs=files.map(File::getPath),video=video,start="0",end="${minOf(duration,if(editor.value.tool=="gif")5.0 else duration)}",clips=clips,selectedClip=0,playheadMs=0,suggestions=emptyList())
             message.value="${files.size} media file(s) imported into private storage."
         } finally { importing.value=false }
     }
@@ -98,13 +113,26 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         if(!draft) {
             if(e.tool in setOf("photo","video","aigif")) { require(e.prompt.isNotBlank()) { "Enter a prompt." }; require(prefs.value.backend.isNotBlank() && prefs.value.remoteConsent) { "Set up an HTTPS backend and allow remote processing in Settings." } }
             else require(e.inputs.isNotEmpty()) { "Import media first." }
+            if(e.tool=="clipper") {
+                require(e.start.toDoubleOrNull()!=null && e.end.toDoubleOrNull()!=null) { "Enter valid trim times." }
+                e.clips.forEach { it.validated() }
+                CaptionTrack.parse(e.captions,e.clips.sumOf { it.durationMs }.coerceAtLeast(1))
+            }
             if(e.tool=="gif" && e.video && e.format=="GIF")EditRules.frameTimes(((e.start.toDoubleOrNull() ?: 0.0)*1000).toLong(),((e.end.toDoubleOrNull() ?: 0.0)*1000).toLong(),e.fps,e.speed)
         }
         val p=Project(UUID.randomUUID().toString(),"${e.tool.uppercase()} · ${java.text.SimpleDateFormat("MMM dd HH:mm",java.util.Locale.US).format(java.util.Date())}",e.tool,e.recipe(prefs.value).toString())
         if(draft) { dao.save(p); message.value="Saved in projects." } else enqueue(p)
     }
     fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.status(project.id,"cancelled") }
-    fun resume(project:Project) { editor.value=EditorState.restore(project.tool,project.recipe); screen.value="editor" }
+    fun resume(project:Project) = launch {
+        var state=EditorState.restore(project.tool,project.recipe)
+        if(state.tool=="clipper" && state.clips.isEmpty() && state.inputs.isNotEmpty()) {
+            val restored=state
+            val clips=withContext(Dispatchers.IO) { restored.inputs.mapIndexed { index,path -> val d=VideoEngine.duration(File(path)); ClipEdit(path,if(index==0)((restored.start.toDoubleOrNull() ?: 0.0)*1000).toLong() else 0,if(index==0)((restored.end.toDoubleOrNull() ?: d/1000.0)*1000).toLong() else d,d) } }
+            state=state.copy(clips=clips,playheadMs=clips.first().startMs)
+        }
+        editor.value=state; screen.value="editor"
+    }
     fun retry(project:Project) = launch { enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output="")) }
     fun rename(project:Project,name:String) = launch { dao.rename(project.id,name.take(80).ifBlank { project.name }) }
     fun favorite(project:Project) = launch { dao.favorite(project.id,!project.favorite) }
@@ -129,12 +157,43 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun export(project:Project,uri:Uri) = launch { withContext(Dispatchers.IO) { app.contentResolver.openOutputStream(uri)!!.use { sink -> File(project.output).inputStream().use { it.copyTo(sink) } } }; message.value="Export complete." }
     fun analyze(silence:Boolean) = launch {
         importing.value=true
-        try { val e=editor.value; require(e.inputs.isNotEmpty() && e.video) { "Import a video first." }; val points=if(silence)VideoEngine.silence(File(e.inputs.first())) else VideoEngine.scenes(File(e.inputs.first())); message.value=(if(silence)"Quiet audio at " else "Scene cuts at ")+if(points.isEmpty())"none detected" else points.take(25).joinToString { "${it/1000.0}s" } } finally { importing.value=false }
+        try { val e=editor.value; require(e.inputs.isNotEmpty() && e.video) { "Import a video first." }; val path=e.clips.getOrNull(e.selectedClip)?.path ?: e.inputs.first(); val points=if(silence)VideoEngine.silence(File(path)) else VideoEngine.scenes(File(path)); edit { it.copy(suggestions=points) }; message.value=if(points.isEmpty())"No ${if(silence)"quiet audio" else "scene cuts"} detected." else "${points.size} measured suggestions are ready. Tap a timestamp to seek, then split or trim." } finally { importing.value=false }
     }
     fun split() = launch {
-        val e=editor.value; require(e.tool=="clipper" && e.inputs.isNotEmpty()) { "Import a clip first." }
-        val start=(e.start.toDoubleOrNull() ?: 0.0); val end=e.end.toDoubleOrNull() ?: error("Enter end time."); require(end>start) { "End must be after start." }; val middle=(start+end)/2
-        for((a,b) in listOf(start to middle,middle to end)) { val piece=e.copy(inputs=listOf(e.inputs.first()),start="$a",end="$b"); val id=UUID.randomUUID().toString(); dao.save(Project(id,"SPLIT ${a}s – ${b}s","clipper",piece.recipe(prefs.value).toString())) }; message.value="First clip split into two editable drafts in Projects. Resume either to export."
+        val e=editor.value; require(e.tool=="clipper" && e.clips.isNotEmpty()) { "Import a clip first." }
+        val clips=Timeline.split(e.clips,e.selectedClip,e.playheadMs)
+        editor.value=e.copy(clips=clips,end="${clips[e.selectedClip].endMs/1000.0}")
+        message.value="Clip split at the playhead. Both pieces are now editable in the timeline."
+    }
+    fun selectClip(index:Int) {
+        val e=editor.value; val clip=e.clips.getOrNull(index) ?: return
+        editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList())
+    }
+    fun moveClip(direction:Int) {
+        val e=editor.value; if(e.clips.isEmpty())return
+        val target=(e.selectedClip+direction).coerceIn(e.clips.indices)
+        editor.value=e.copy(clips=Timeline.move(e.clips,e.selectedClip,direction),selectedClip=target)
+    }
+    fun removeClip() {
+        val e=editor.value; if(e.clips.isEmpty())return
+        val clips=e.clips.filterIndexed { i,_ -> i!=e.selectedClip }
+        editor.value=e.copy(clips=clips,inputs=clips.map { it.path }.distinct(),selectedClip=0,suggestions=emptyList())
+        if(clips.isNotEmpty())selectClip(0)
+    }
+    fun seek(ms:Long) {
+        val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip) ?: return
+        val position=ms.coerceIn(clip.startMs,clip.endMs.coerceAtLeast(clip.startMs))
+        editor.value=e.copy(playheadMs=position,previewRequestMs=position)
+    }
+    fun previewPosition(ms:Long) { val e=editor.value; if(e.tool=="clipper")editor.value=e.copy(playheadMs=ms) }
+    fun importCaptions(uri:Uri) = launch {
+        val text=withContext(Dispatchers.IO) { app.contentResolver.openInputStream(uri)!!.bufferedReader().use { val chars=CharArray(1_000_001); var count=0; while(count<chars.size) { val n=it.read(chars,count,chars.size-count); if(n<0)break; count+=n }; require(count<=1_000_000) { "Subtitle file exceeds 1 MB." }; String(chars,0,count) } }
+        val e=editor.value; val cues=CaptionTrack.parse(text,e.clips.sumOf { it.durationMs }.coerceAtLeast(1))
+        edit { it.copy(captions=CaptionTrack.srt(cues)) }; message.value="${cues.size} editable subtitle cues imported. Times use the exported timeline."
+    }
+    fun exportCaptions(uri:Uri) = launch {
+        val e=editor.value; val text=CaptionTrack.srt(CaptionTrack.parse(e.captions,e.clips.sumOf { it.durationMs }.coerceAtLeast(1)))
+        withContext(Dispatchers.IO) { app.contentResolver.openOutputStream(uri)!!.bufferedWriter().use { it.write(text) } }; message.value="SRT captions exported."
     }
     fun clean() = launch {
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }

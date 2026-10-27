@@ -21,7 +21,7 @@ object VideoEngine {
         val reader=MediaMetadataRetriever()
         try { reader.setDataSource(file.path); return reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: error("Cannot read video duration.") } finally { reader.release() }
     }
-    suspend fun export(context:Context, segments:List<Segment>, output:File, aspect:String, enhance:Float, captions:List<Pair<Long,String>>, progress:(Int?)->Unit) = withContext(Dispatchers.Main) {
+    suspend fun export(context:Context, segments:List<Segment>, output:File, aspect:String, enhance:Float, captions:List<CaptionCue>, denoise:Boolean=false, sharpen:Boolean=false, progress:(Int?)->Unit) = withContext(Dispatchers.Main) {
         require(segments.isNotEmpty()) { "Import at least one video." }
         val effects=mutableListOf<Effect>()
         if(aspect!="Original") {
@@ -29,22 +29,24 @@ object VideoEngine {
             effects+=Presentation.createForAspectRatio(ratio,Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
         }
         if(enhance>0) { effects+=Brightness(0.06f*enhance); effects+=Contrast(0.15f*enhance); effects+=HslAdjustment.Builder().adjustSaturation(12f*enhance).build() }
+        if(denoise || sharpen)effects+=DetailEffect(if(denoise)enhance else 0f,if(sharpen)enhance else 0f)
         if(captions.isNotEmpty()) {
             val overlay=object:TextOverlay() {
                 override fun getText(presentationTimeUs:Long):android.text.SpannableString {
                     val time=presentationTimeUs/1000
-                    val text=captions.lastOrNull { it.first<=time }?.second.orEmpty()
-                    return android.text.SpannableString(text).apply { setSpan(android.text.style.ForegroundColorSpan(android.graphics.Color.WHITE),0,length,0); setSpan(android.text.style.AbsoluteSizeSpan(28,true),0,length,0) }
+                    val text=CaptionTrack.textAt(captions,time)
+                    return android.text.SpannableString(text).apply { setSpan(android.text.style.ForegroundColorSpan(android.graphics.Color.WHITE),0,length,0); setSpan(android.text.style.BackgroundColorSpan(android.graphics.Color.argb(170,21,24,39)),0,length,0); setSpan(android.text.style.AbsoluteSizeSpan(28,true),0,length,0) }
                 }
+                override fun getOverlaySettings(presentationTimeUs:Long):OverlaySettings = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(0f,-0.82f).setOverlayFrameAnchor(0f,-1f).build()
             }
             effects+=OverlayEffect(listOf(overlay))
         }
         val items=segments.map { s ->
             EditRules.validateTrim(s.start,s.end,duration(s.file))
             val item=MediaItem.Builder().setUri(Uri.fromFile(s.file)).setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setStartPositionMs(s.start).setEndPositionMs(s.end).build()).build()
-            EditedMediaItem.Builder(item).setEffects(Effects(emptyList(),effects)).build()
+            EditedMediaItem.Builder(item).build()
         }
-        val composition=Composition.Builder(EditedMediaItemSequence(items)).build()
+        val composition=Composition.Builder(EditedMediaItemSequence(items)).setEffects(Effects(emptyList(),effects)).experimentalSetForceAudioTrack(true).setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL).build()
         transform(context,composition,output,progress)
     }
     suspend fun imagesToMp4(context:Context, files:List<File>, output:File, fps:Int, progress:(Int?)->Unit) = withContext(Dispatchers.Main) {

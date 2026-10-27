@@ -33,7 +33,7 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                     require(inputs.isNotEmpty()) { "Import media first." }
                     if(recipe.optBoolean("video")) {
                         val duration=VideoEngine.duration(inputs.first())
-                        VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),0,duration)),output,"Original",recipe.optDouble("intensity",0.7).toFloat(),emptyList()) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
+                        VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),0,duration)),output,"Original",recipe.optDouble("intensity",0.7).toFloat(),emptyList(),recipe.optBoolean("denoise"),recipe.optBoolean("sharpen")) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else {
                         val source=PhotoEngine.read(inputs.first(),if(tool=="upscale")1024 else 2048)
                         try {
@@ -44,8 +44,13 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                     }
                 }
                 "clipper" -> {
-                    val segments=inputs.mapIndexed { i,file -> val duration=VideoEngine.duration(file); Segment(file,if(i==0)recipe.optLong("start",0) else 0,if(i==0)recipe.optLong("end",duration).coerceAtMost(duration) else duration) }
-                    val captions=recipe.optString("captions").lines().mapNotNull { line -> val parts=line.split('|',limit=2); if(parts.size==2)parts[0].trim().toLongOrNull()?.let { it to parts[1].trim() } else null }.sortedBy { it.first }
+                    val timeline=recipe.optJSONArray("clips")
+                    val segments=if(timeline!=null && timeline.length()>0)List(timeline.length()) { index ->
+                        val c=timeline.getJSONObject(index); val file=File(c.getString("path")).canonicalFile
+                        require(file.path.startsWith(File(applicationContext.filesDir,"imports").canonicalPath+File.separator)) { "Invalid clip location." }
+                        Segment(file,c.getLong("start"),c.getLong("end"))
+                    } else inputs.mapIndexed { i,file -> val duration=VideoEngine.duration(file); Segment(file,if(i==0)recipe.optLong("start",0) else 0,if(i==0)recipe.optLong("end",duration).coerceAtMost(duration) else duration) }
+                    val captions=CaptionTrack.parse(recipe.optString("captions"),segments.sumOf { it.end-it.start })
                     VideoEngine.export(applicationContext,segments,output,recipe.optString("aspect","Original"),0f,captions) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                 }
                 "gif" -> {
