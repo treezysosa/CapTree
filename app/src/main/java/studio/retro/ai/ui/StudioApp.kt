@@ -32,6 +32,8 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
     val projects by vm.projects.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
+    val busyMessage by vm.busyMessage.collectAsStateWithLifecycle()
+    val backendReport by vm.backendReport.collectAsStateWithLifecycle()
     var selected by remember { mutableIntStateOf(0) }
     val haptic=LocalHapticFeedback.current
     val tone=remember { runCatching { ToneGenerator(AudioManager.STREAM_MUSIC,25) }.getOrNull() }
@@ -49,10 +51,10 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
                 }
                 IconButton({ vm.screen.value="settings" },Modifier.background(Navy,RoundedCornerShape(8.dp))) { Icon(Icons.Default.Settings,"Settings cartridge",tint=c.accent) }
             }
-            val busy=projects.any { it.status in setOf("queued","processing") }
+            val busy=importing || projects.any { it.status in setOf("queued","processing") }
             Row(Modifier.fillMaxWidth().padding(bottom=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
                 PixelText(if(busy)"▰▱▱ PROCESSING" else "▰▰▰ READY",color=if(busy)c.pink else c.lcd,size=7)
-                Text(if(prefs.backend.isBlank())"OFFLINE MODE" else "SERVER CONFIGURED",color=Cream,fontSize=9.sp)
+                Text(if(prefs.backend.isBlank())"OFFLINE MODE" else if(backendReport?.optString("_origin")==prefs.backend)"SERVER CHECKED" else "SERVER CONFIGURED",color=Cream,fontSize=9.sp)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when(route) {
@@ -63,7 +65,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
                     "settings" -> SettingsScreen(vm)
                     "processing" -> ProcessingScreen(vm)
                 }
-                if(importing) Box(Modifier.fillMaxSize().background(Screen.copy(alpha=0.93f)).clickable(enabled=true,onClick={}),contentAlignment=Alignment.Center) { ConsolePanel { PixelProgress(null,"READING YOUR MEDIA...") } }
+                if(importing) Box(Modifier.fillMaxSize().background(Screen.copy(alpha=0.93f)).clickable(enabled=true,onClick={}),contentAlignment=Alignment.Center) { ConsolePanel { PixelProgress(null,busyMessage) } }
             }
             ConsoleControls(
                 onMove={ delta -> feedback(); if(route=="home")selected=(selected+delta+6)%6 else if(route=="editor" && editor.tool=="clipper") { if(kotlin.math.abs(delta)==1)vm.seek(editor.playheadMs+delta*33L) else vm.selectClip((editor.selectedClip+if(delta>0)1 else -1).coerceIn(0,(editor.clips.size-1).coerceAtLeast(0))) } },

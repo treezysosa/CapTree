@@ -18,6 +18,8 @@ import studio.retro.ai.StudioViewModel
 import studio.retro.ai.data.Project
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable fun ProjectsScreen(vm:StudioViewModel,gallery:Boolean) {
     val projects by vm.projects.collectAsStateWithLifecycle()
@@ -25,11 +27,11 @@ import java.util.UUID
     var opened by remember { mutableStateOf<String?>(null) }
     var rename by remember { mutableStateOf<Project?>(null) }
     var newName by remember { mutableStateOf("") }
-    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Favorites"->it.favorite; else->true } }
+    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Favorites"->it.favorite; else->true } }
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         PixelText(if(gallery)"PIXEL GALLERY" else "SAVE GAME MENU",color=LocalConsole.current.lcd)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("PROJECTS",{ vm.screen.value="projects" },Modifier.weight(1f)); RaisedButton("GALLERY",{ vm.screen.value="gallery" },Modifier.weight(1f)) }
-        Choice("FILTER",listOf("All","Photos","Videos","GIFs","Favorites"),filter) { filter=it }
+        Choice("FILTER",listOf("All","Photos","Videos","GIFs","Captions","Favorites"),filter) { filter=it }
         if(visible.isEmpty())Text("Your save slots are empty. Press START to create something.",fontSize=14.sp)
         LazyColumn(verticalArrangement=Arrangement.spacedBy(12.dp)) {
             items(visible,key={it.id}) { p ->
@@ -79,9 +81,13 @@ import java.util.UUID
     if(p.tool in setOf("enhance","upscale") && !source.isNullOrBlank()) {
         Choice("COMPARISON",if(p.mime.startsWith("video/"))listOf("Before","After") else listOf("Before","After","Wipe"),comparison) { comparison=it }
     }
-    if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
+    if(p.mime=="application/x-subrip") {
+        val captions by produceState("Loading subtitles…",p.output) { value=withContext(Dispatchers.IO) { File(p.output).readText().take(12000) } }
+        Text(captions,fontSize=12.sp,maxLines=20)
+        RaisedButton("REOPEN TIMELINE WITH SUBTITLES",{ vm.applyTranscript(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
+    } else if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
-    if(android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
+    if(p.mime!="application/x-subrip" && android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("EXPORT FILE",{ export.launch("RETRO_${p.id}.${File(p.output).extension}") },Modifier.weight(1f)); RaisedButton("SHARE",{ vm.share(p) },Modifier.weight(1f),LocalConsole.current.pink) }
 }

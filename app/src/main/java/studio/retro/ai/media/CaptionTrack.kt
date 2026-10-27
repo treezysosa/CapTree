@@ -8,6 +8,16 @@ data class CaptionCue(val startMs: Long, val endMs: Long, val text: String) {
 }
 
 object CaptionTrack {
+    fun replaceRange(existing:List<CaptionCue>,replacement:List<CaptionCue>,startMs:Long,endMs:Long):List<CaptionCue> {
+        require(startMs>=0 && endMs>startMs)
+        val retained=existing.flatMap { cue ->
+            if(cue.endMs<=startMs || cue.startMs>=endMs)listOf(cue) else listOfNotNull(
+                if(cue.startMs<startMs)cue.copy(endMs=startMs) else null,
+                if(cue.endMs>endMs)cue.copy(startMs=endMs) else null
+            )
+        }
+        return (retained+replacement).sortedBy { it.startMs }
+    }
     fun parse(input: String, durationMs: Long): List<CaptionCue> {
         val normalized = input.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n').trim()
         if (normalized.isBlank()) return emptyList()

@@ -27,7 +27,8 @@ data class EditorState(
     val prompt:String="", val negative:String="", val style:String="Cinematic", val aspect:String="1:1",
     val seed:String="", val duration:Int=3, val motion:Float=0.5f, val captions:String="",
     val clips:List<ClipEdit> = emptyList(), val selectedClip:Int=0, val playheadMs:Long=0,
-    val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null
+    val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null,
+    val transcriptionLanguage:String="auto"
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -37,13 +38,17 @@ data class EditorState(
         put("prompt",prompt); put("negative",negative); put("style",style); put("aspect",aspect); put("seed",seed.toLongOrNull() ?: -1L); put("duration",duration); put("motion",motion.toDouble()); put("captions",captions)
         put("backend",prefs.backend); put("consent",prefs.remoteConsent); put("quality",prefs.quality)
         put("clips",JSONArray().apply { clips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id) }) } })
+        put("transcription_language",transcriptionLanguage)
+        put("selected_clip",selectedClip)
     }
     companion object {
         fun restore(tool:String,json:String):EditorState {
             val r=JSONObject(json); val a=r.optJSONArray("inputs") ?: JSONArray()
             val timeline=r.optJSONArray("clips")
             val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),c.optString("id",UUID.randomUUID().toString())) }
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${r.optLong("start")/1000.0}","${r.optLong("end",3000)/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,playheadMs=clips.firstOrNull()?.startMs ?: 0)
+            val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
+            val chosen=clips.getOrNull(selected)
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"))
         }
     }
 }
@@ -57,6 +62,9 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val editor=MutableStateFlow(EditorState())
     val message=MutableStateFlow("")
     val importing=MutableStateFlow(false)
+    val busyMessage=MutableStateFlow("READING YOUR MEDIA...")
+    val modelReport=MutableStateFlow("")
+    val backendReport=MutableStateFlow<JSONObject?>(null)
     val active=MutableStateFlow<String?>(null)
     val work=WorkManager.getInstance(app)
     fun open(tool:String) { editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
@@ -70,7 +78,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         }
         editor.value=next
     }
-    fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } catch(e:LinkageError) { message.value="Unsupported device: this native library cannot load on your CPU/Android version." } } }
+    fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } catch(e:LinkageError) { message.value="Unsupported device: this native library cannot load on your CPU/Android version." } catch(e:OutOfMemoryError) { message.value="Not enough memory for this operation. Try a smaller input or a device with more RAM." } } }
     fun import(uris:List<Uri>,video:Boolean) = launch {
         importing.value=true
         try {
@@ -97,14 +105,17 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         } finally { importing.value=false }
     }
     fun model(uri:Uri) = launch {
+        require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for current processing to finish before installing a model." }
+        busyMessage.value="TESTING ONNX MODEL ON THIS DEVICE..."
         importing.value=true
         try { withContext(Dispatchers.IO) {
             val dir=File(app.filesDir,"models").apply { mkdirs() }; val tmp=File(dir,"install.tmp")
             try { app.contentResolver.openInputStream(uri)!!.use { source -> tmp.outputStream().use { sink -> val b=ByteArray(65536); var count=0L; while(true) { val n=source.read(b); if(n<0)break; count+=n; require(count<=160L*1024*1024) { "Model exceeds 160 MB." }; sink.write(b,0,n) } } }
-                ai.onnxruntime.OrtEnvironment.getEnvironment().createSession(tmp.path).use { require(it.inputNames.size==1) { "Expected one RGB input tensor." } }
+                val report=ModelValidator.probe(tmp)
                 require(tmp.renameTo(File(dir,"realesrgan-x4.onnx"))) { "Cannot install model." }
+                File(dir,"validation.txt").writeText(report.description()); modelReport.value=report.description()
             } finally { tmp.delete() }
-        }; message.value="Real-ESRGAN model installed. Its tensor format is checked during inference." } finally { importing.value=false }
+        }; message.value="Model installed after successful on-device x4 inference validation." } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
     }
     private suspend fun enqueue(project:Project) {
         val request=OneTimeWorkRequestBuilder<CreationWorker>().setInputData(workDataOf("project" to project.id)).addTag("creation").build()
@@ -113,6 +124,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         active.value=project.id; screen.value="processing"
     }
     fun create(draft:Boolean=false) = launch {
+        require(!importing.value) { "Wait for the current import or model test to finish." }
         val e=editor.value
         if(!draft) {
             if(e.tool in setOf("photo","video","aigif")) { require(e.prompt.isNotBlank()) { "Enter a prompt." }; require(prefs.value.backend.isNotBlank() && prefs.value.remoteConsent) { "Set up an HTTPS backend and allow remote processing in Settings." } }
@@ -129,7 +141,8 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.status(project.id,"cancelled") }
     fun resume(project:Project) = launch {
-        var state=EditorState.restore(project.tool,project.recipe)
+        if(project.tool=="transcribe" && project.status=="completed") { applyTranscript(project); return@launch }
+        var state=EditorState.restore(if(project.tool=="transcribe")"clipper" else project.tool,project.recipe)
         if(state.tool=="clipper" && state.clips.isEmpty() && state.inputs.isNotEmpty()) {
             val restored=state
             val clips=withContext(Dispatchers.IO) { restored.inputs.mapIndexed { index,path -> val d=VideoEngine.duration(File(path)); ClipEdit(path,if(index==0)((restored.start.toDoubleOrNull() ?: 0.0)*1000).toLong() else 0,if(index==0)((restored.end.toDoubleOrNull() ?: d/1000.0)*1000).toLong() else d,d) } }
@@ -206,5 +219,39 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
         }; message.value="Cache and unused imports cleared."
     }
-    fun testBackend() = launch { val health=withContext(Dispatchers.IO) { BackendClient(prefs.value.backend,BackendSecrets(app).read()).health() }; message.value="Connected · ${health.optJSONArray("capabilities")}" }
+    fun testBackend() = launch {
+        val origin=prefs.value.backend
+        val health=withContext(Dispatchers.IO) { BackendClient(origin,BackendSecrets(app).read()).health() }
+        backendReport.value=health.put("_origin",origin)
+        message.value=if(health.optInt("api_version",1)<2)"Connected to an older backend. Update it to v0.3 for readiness checks and automatic subtitles." else "Connected. Review each feature's model state below. Not loaded means inference has not yet been verified."
+    }
+    fun testModel() = launch {
+        require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for current processing to finish." }
+        importing.value=true; busyMessage.value="RUNNING ON-DEVICE MODEL TEST..."
+        try {
+            val description=withContext(Dispatchers.IO) {
+                val file=File(app.filesDir,"models/realesrgan-x4.onnx"); val report=ModelValidator.probe(file)
+                File(file.parentFile,"validation.txt").writeText(report.description()); report.description()
+            }
+            modelReport.value=description; message.value="On-device x4 inference test passed. This verifies compatibility, not the provenance of user-supplied weights."
+        } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
+    }
+    fun transcribe() = launch {
+        require(!importing.value) { "Wait for current processing to finish." }
+        val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip)?.validated() ?: error("Select a video clip first.")
+        require(clip.durationMs<=600000) { "Trim the selected clip to ten minutes or less." }
+        require(prefs.value.remoteConsent && prefs.value.backend.isNotBlank()) { "Configure a backend and allow remote processing in Settings first." }
+        val recipe=e.recipe(prefs.value).put("transcribe_index",e.selectedClip).put("caption_offset",Timeline.outputOffset(e.clips,e.selectedClip))
+        enqueue(Project(UUID.randomUUID().toString(),"AUTO SUBTITLES · CLIP ${e.selectedClip+1}","transcribe",recipe.toString()))
+    }
+    fun applyTranscript(project:Project) = launch {
+        require(project.status=="completed" && project.mime=="application/x-subrip")
+        val state=EditorState.restore("clipper",project.recipe)
+        val recipe=JSONObject(project.recipe); val index=recipe.optInt("transcribe_index",0); val clip=state.clips.getOrNull(index) ?: error("Original clip is missing.")
+        val duration=state.clips.sumOf { it.durationMs }; val offset=recipe.optLong("caption_offset",0)
+        val replacement=withContext(Dispatchers.IO) { CaptionTrack.parse(File(project.output).readText(),duration) }
+        val combined=CaptionTrack.replaceRange(CaptionTrack.parse(state.captions,duration),replacement,offset,offset+clip.durationMs)
+        editor.value=state.copy(captions=CaptionTrack.srt(combined)); screen.value="editor"
+        message.value="Subtitles applied to the saved timeline snapshot. Review text and timing before exporting."
+    }
 }

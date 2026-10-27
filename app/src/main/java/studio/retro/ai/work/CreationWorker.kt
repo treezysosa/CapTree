@@ -17,11 +17,11 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
         val project=dao.get(id) ?: return@withContext Result.failure()
         val recipe=JSONObject(project.recipe); val tool=project.tool
         val outputDir=File(applicationContext.filesDir,"outputs").apply { mkdirs() }
-        val mp4=recipe.optString("format")=="MP4" || tool=="video" || tool=="clipper" || (tool=="enhance" && recipe.optBoolean("video"))
+        val mp4=tool!="transcribe" && (recipe.optString("format")=="MP4" || tool=="video" || tool=="clipper" || (tool=="enhance" && recipe.optBoolean("video")))
         val jpeg=tool in setOf("enhance","upscale") && !mp4 && recipe.optInt("quality",92)<100
-        val suffix=if(mp4)"mp4" else if(tool in setOf("gif","aigif"))"gif" else if(jpeg)"jpg" else "png"
+        val suffix=if(tool=="transcribe")"srt" else if(mp4)"mp4" else if(tool in setOf("gif","aigif"))"gif" else if(jpeg)"jpg" else "png"
         val output=File(outputDir,"$id.$suffix")
-        val mime=if(mp4)"video/mp4" else if(suffix=="gif")"image/gif" else if(jpeg)"image/jpeg" else "image/png"
+        val mime=if(tool=="transcribe")"application/x-subrip" else if(mp4)"video/mp4" else if(suffix=="gif")"image/gif" else if(jpeg)"image/jpeg" else "image/png"
         suspend fun progress(value:Int?,message:String) { setProgress(workDataOf("percent" to (value ?: -1),"message" to message)) }
         try {
             if(dao.status(id,"processing")==0)return@withContext Result.failure()
@@ -58,6 +58,25 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                         if(recipe.optBoolean("video")) { val duration=VideoEngine.duration(inputs.first()); VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),recipe.optLong("start",0),recipe.optLong("end",duration))),output,"Original",0f,emptyList()) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) } }
                         else VideoEngine.imagesToMp4(applicationContext,inputs,output,recipe.optInt("fps",8)) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else GifEngine.create(inputs,recipe.optBoolean("video"),output,recipe.optLong("start"),recipe.optLong("end",3000),recipe.optInt("fps",8),recipe.optDouble("speed",1.0).toFloat(),recipe.optInt("width",320),recipe.optBoolean("loop",true),recipe.optString("caption"),recipe.optString("sticker")) { progress(it,"ENCODING ANIMATION...") }
+                }
+                "transcribe" -> {
+                    val prefs=app.settings.flow.first()
+                    require(prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Allow remote processing for this backend in Settings first." }
+                    val client=BackendClient(prefs.backend,BackendSecrets(applicationContext).read())
+                    client.requireCapability("transcription")
+                    val clips=recipe.getJSONArray("clips"); val selected=clips.getJSONObject(recipe.optInt("transcribe_index",0))
+                    val source=File(selected.getString("path")).canonicalFile
+                    require(source in inputs) { "Invalid selected audio source." }
+                    val start=selected.getLong("start"); val end=selected.getLong("end")
+                    val audio=File(applicationContext.cacheDir,"selected-audio-$id.wav")
+                    try {
+                        AudioEngine.extractWav(source,start,end,audio) { progress(it,"PREPARING SELECTED AUDIO...") }
+                        client.transcribe(audio,recipe.optString("transcription_language","auto"),output) { percent,message -> progress(percent,message) }
+                        val offset=recipe.optLong("caption_offset",0)
+                        val cues=CaptionTrack.parse(output.readText(),end-start).filter { it.startMs<end-start }.map { it.copy(startMs=it.startMs+offset,endMs=minOf(it.endMs,end-start)+offset) }
+                        require(cues.isNotEmpty()) { "No subtitle cues were returned." }
+                        output.writeText(CaptionTrack.srt(cues))
+                    } finally { audio.delete() }
                 }
                 "photo","video","aigif" -> {
                     val prefs=app.settings.flow.first()

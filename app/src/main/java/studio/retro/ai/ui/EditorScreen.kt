@@ -18,12 +18,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.*
 import studio.retro.ai.*
 import java.io.File
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable fun EditorScreen(vm:StudioViewModel,e:EditorState) {
     val imagePicker=rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(40)) { if(it.isNotEmpty())vm.import(it,false) }
     val videoPicker=rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(12)) { if(it.isNotEmpty())vm.import(it,true) }
     val subtitlePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { if(it!=null)vm.importCaptions(it) }
     val subtitleExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-subrip")) { if(it!=null)vm.exportCaptions(it) }
+    val prefs by vm.prefs.collectAsStateWithLifecycle()
+    var confirmTranscription by remember { mutableStateOf(false) }
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
@@ -67,6 +70,9 @@ import java.io.File
                 if(e.suggestions.isNotEmpty())LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.suggestions.size) { index -> TextButton({ vm.seek(e.suggestions[index]) }) { Text("${e.suggestions[index]/1000.0}s") } } }
                 Text("Suggestions measure scene changes and quiet audio; they do not classify semantic highlights.",fontSize=11.sp,color=LocalConsole.current.accent)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
+                Choice("SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
+                RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
+                Text("Optional speech recognition runs on your self-hosted server. Only the selected clip's trimmed audio is sent, after confirmation. Other editing stays offline.",fontSize=11.sp)
                 RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit { it.copy(captions=value) } },multiline=true)
                 Text("Caption times refer to the exported timeline. Reordering/trimming clips does not retime captions automatically. Export validates subtitle syntax. The optional faster-whisper CLI can generate SRT input from speech.",fontSize=11.sp)
             }
@@ -102,6 +108,13 @@ import java.io.File
         RaisedButton(if(isAI)"START GENERATION" else "START PROCESSING",{ vm.create() },Modifier.fillMaxWidth(),LocalConsole.current.pink)
         RaisedButton("SAVE UNFINISHED PROJECT",{ vm.create(true) },Modifier.fillMaxWidth())
     }
+    if(confirmTranscription)AlertDialog(
+        onDismissRequest={ confirmTranscription=false },
+        title={ PixelText("SEND SELECTED AUDIO?",size=9,color=LocalConsole.current.lcd) },
+        text={ Text("Only trimmed audio from clip ${e.selectedClip+1} will be sent to ${prefs.backend.ifBlank { "your configured server (not set yet)" }} for speech recognition. Video frames stay on your phone. Your current timeline is saved for applying the resulting editable subtitles. Remote processing must also be allowed in Settings.") },
+        confirmButton={ TextButton({ confirmTranscription=false; vm.transcribe() }) { Text("SEND AUDIO") } },
+        dismissButton={ TextButton({ confirmTranscription=false }) { Text("CANCEL") } }
+    )
 }
 @Composable private fun ClipTimeline(vm:StudioViewModel,e:EditorState) {
     val colors=LocalConsole.current
