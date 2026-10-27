@@ -33,6 +33,15 @@ def prepare(output):
         zipped.extractall(output)
     subprocess.run(["espeak-ng", "-v", "en-us", "-s", "135", "-w", str(output / "raw.wav"), "one two three four five. this is a speech recognition test."], check=True)
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(output / "raw.wav"), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(output / "speech.wav")], check=True)
+    # Match AudioEngine's internal 44-byte PCM header, without ffmpeg's LIST metadata.
+    with wave.open(str(output / "speech.wav"), "rb") as decoded:
+        pcm = decoded.readframes(decoded.getnframes())
+    with wave.open(str(output / "speech.wav"), "wb") as canonical:
+        canonical.setnchannels(1)
+        canonical.setsampwidth(2)
+        canonical.setframerate(16000)
+        canonical.writeframes(pcm)
+    assert (output / "speech.wav").read_bytes()[36:40] == b"data"
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x24253c:s=320x240:r=15", "-i", str(output / "speech.wav"), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(output / "speech.mp4")], check=True)
     return archive, digest.hexdigest(), names
 

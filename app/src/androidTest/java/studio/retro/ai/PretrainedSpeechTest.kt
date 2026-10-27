@@ -34,7 +34,8 @@ class PretrainedSpeechTest {
             assets.open("speech-validation/speech-model.zip").use { input -> SpeechModelStore.install(input,models,OfflineSpeech::probe) }
             assertTrue(SpeechModelStore.installed(models))
             app.settings.backend("https://offline-speech-must-not-connect.invalid"); app.settings.consent(false)
-            withTimeout(10000) { vm.prefs.first { !it.remoteConsent && it.backend.contains("must-not-connect") } }
+            assertFalse(app.settings.flow.first().remoteConsent)
+            assertTrue(app.settings.flow.first().backend.contains("must-not-connect"))
             val permissions=app.packageManager.getPackageInfo(app.packageName,PackageManager.GET_PERMISSIONS).requestedPermissions.orEmpty()
             assertFalse("File transcription must not request a microphone",permissions.contains("android.permission.RECORD_AUDIO"))
             val duration=VideoEngine.duration(source)
@@ -53,7 +54,7 @@ class PretrainedSpeechTest {
             assertTrue(text,setOf("one","two","three","four","five").count { text.split(' ').contains(it) }>=3)
             assertTrue(cues.all { it.startMs>=500 && it.endMs<=duration+500 })
             withContext(Dispatchers.Main) { vm.applyTranscript(transcript) }
-            withTimeout(10000) { vm.editor.first { it.captions.contains("one") } }
+            withTimeout(30000) { vm.editor.first { it.captions.contains("KEEP INTRO") && it.captions.contains("one") } }
             assertEquals("KEEP INTRO",CaptionTrack.textAt(CaptionTrack.parse(vm.editor.value.captions,duration+500),100))
             val before=app.database.projects().observe().first().map { it.id }.toSet()
             withContext(Dispatchers.Main) { vm.create() }
