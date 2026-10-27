@@ -34,7 +34,7 @@ object VideoEngine {
             val dimensions=frameSize(segments.first().file)
             val (w,h)=EditRules.outputSize(dimensions.first,dimensions.second,animation.longestEdge)
             effects+=Presentation.createForWidthAndHeight((w/2*2).coerceAtLeast(2),(h/2*2).coerceAtLeast(2),Presentation.LAYOUT_SCALE_TO_FIT)
-            effects+=FrameDropEffect.createDefaultFrameDropEffect(animation.fps.toFloat())
+            effects+=FrameRateEffect(animation.fps)
         }
         if(stabilization!=null)effects+=Stabilizer.effect(stabilization)
         if(enhance>0) { effects+=Brightness(0.06f*enhance); effects+=Contrast(0.15f*enhance); effects+=HslAdjustment.Builder().adjustSaturation(12f*enhance).build() }

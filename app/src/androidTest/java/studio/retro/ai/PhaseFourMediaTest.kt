@@ -61,7 +61,7 @@ class PhaseFourMediaTest {
         } finally { input.delete(); mp4.delete() }
     }
 
-    @androidx.annotation.RequiresApi(28)
+    @androidx.test.filters.SdkSuppress(minSdkVersion=28)
     @Test fun videoOverlaysEncodeAndTimedCaptionsDisappear():Unit=runBlocking {
         val image=photo(); val input=output("mp4"); val mp4=output("mp4")
         try {
@@ -90,8 +90,9 @@ class PhaseFourMediaTest {
                     extractor.selectTrack((0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/")==true })
                     while(extractor.sampleTime>=0) { times+=extractor.sampleTime; if(!extractor.advance())break }
                 } finally { extractor.release() }
-                val ordered=times.sorted(); assertTrue("Enough encoded video frames: $ordered",ordered.size>=7)
+                val ordered=times.sorted(); assertTrue("Encoded video has frames",ordered.isNotEmpty())
                 val samples=ordered.mapIndexed { index,time -> val (top,bottom)=pixels(index); Triple(time-ordered.first(),top,bottom) }
+                assertTrue("Enough encoded video frames: $samples",ordered.size>=7)
                 val active=samples.filter { it.first<300000 }; val expired=samples.filter { it.first>=600000 }
                 assertTrue("Both caption intervals have real frames: $samples",active.isNotEmpty() && expired.isNotEmpty())
                 assertTrue("Video sticker is visibly encoded: $samples",samples.all { it.second>8 })
