@@ -17,10 +17,11 @@ from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
-from .contracts import Generation, Transcription, FaceRestoration
+from .contracts import Generation, Transcription, FaceRestoration, Highlights
 from .inference import GenerationCancelled, InferenceEngine
 from .transcription import TranscriptionEngine, NoSpeechDetected
 from .face_restoration import FaceRestorationEngine, NoFaceDetected
+from .highlights import HighlightEngine
 from .capabilities import features, operation_feature
 
 ROOT = Path(os.environ.get("RETRO_OUTPUT_DIR", "backend/outputs")).resolve()
@@ -30,6 +31,7 @@ POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="retro-inference")
 ENGINE = InferenceEngine()
 TRANSCRIBER = TranscriptionEngine()
 RESTORER = FaceRestorationEngine()
+HIGHLIGHTER = HighlightEngine()
 MAX_UPLOAD = 12 * 1024 * 1024
 MAX_AUDIO = 64 * 1024 * 1024
 Image.MAX_IMAGE_PIXELS = 20_000_000
@@ -64,7 +66,7 @@ def run_job(job, request, image):
         if job.cancel.is_set():
             raise GenerationCancelled()
         job.status = "processing"
-        engine = TRANSCRIBER if isinstance(request, Transcription) else RESTORER if isinstance(request, FaceRestoration) else ENGINE
+        engine = TRANSCRIBER if isinstance(request, Transcription) else RESTORER if isinstance(request, FaceRestoration) else HIGHLIGHTER if isinstance(request, Highlights) else ENGINE
         job.output, job.mime = engine.run(request, image, job)
         if job.cancel.is_set():
             raise GenerationCancelled()
@@ -80,7 +82,10 @@ def run_job(job, request, image):
         job.status, job.error = "failed", f"{type(error).__name__}: model inference failed. Check model installation, license access, and server RAM/VRAM."
     finally:
         if image:
-            image.unlink(missing_ok=True)
+            if image.is_dir():
+                shutil.rmtree(image, ignore_errors=True)
+            else:
+                image.unlink(missing_ok=True)
         if job.status != "completed" and job.output:
             job.output.unlink(missing_ok=True)
         if job.purge:
@@ -118,12 +123,12 @@ async def lifespan(app):
             job.cancel.set()
 
 
-app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.7.0", lifespan=lifespan)
 
 
 @app.get("/v1/health", dependencies=[Depends(auth)])
 def health():
-    status = features(getattr(ENGINE, "kind", None), getattr(TRANSCRIBER, "model", None) is not None, restoration_loaded=getattr(RESTORER, "model", None) is not None)
+    status = features(getattr(ENGINE, "kind", None), getattr(TRANSCRIBER, "model", None) is not None, restoration_loaded=getattr(RESTORER, "model", None) is not None, highlights_loaded=getattr(HIGHLIGHTER, "model", None) is not None)
     return {"status": "online", "api_version": 2, "capabilities": [item["id"] for item in status if item["supported"]], "features": status, "progress": "actual model steps or transcribed audio time; indeterminate during loading/encoding"}
 
 
@@ -275,6 +280,58 @@ async def restore_face(payload: str = Form(default='{"tool":"restore-face"}'), i
         raise
     finally:
         await image.close()
+
+
+@app.post("/v1/highlights", status_code=202, dependencies=[Depends(auth)])
+async def highlights(payload: str = Form(...), frames: list[UploadFile] = File(...)):
+    directory = None
+    job_id = None
+    try:
+        try:
+            if len(payload) > 4096:
+                raise ValueError()
+            request = Highlights.model_validate_json(payload)
+            if len(frames) != len(request.timestamps_ms):
+                raise ValueError()
+        except (ValueError, ValidationError):
+            raise HTTPException(422, "Provide a description, ordered sample times and 1–24 matching frames from a trim of 1–120 seconds.")
+        capability = next(item for item in features() if item["id"] == "semantic-highlights")
+        if not capability["supported"]:
+            raise HTTPException(503, capability["reason"])
+        with LOCK:
+            if sum(j.status in ("queued", "processing") for j in JOBS.values()) >= 3 or len(JOBS) >= 100:
+                raise HTTPException(429, "Server queue is full.")
+            job_id = str(uuid.uuid4())
+            directory = ROOT / job_id
+            folder = directory / "frames"
+            folder.mkdir(parents=True)
+            job = Job(job_id, directory)
+            JOBS[job_id] = job
+        for index, upload in enumerate(frames):
+            data = await upload.read(256 * 1024 + 1)
+            if len(data) > 256 * 1024:
+                raise HTTPException(413, "Each sampled JPEG must be at most 256 KB.")
+            try:
+                import io
+                with Image.open(io.BytesIO(data)) as decoded:
+                    if decoded.format != "JPEG" or not 1 <= min(decoded.size) or max(decoded.size) > 256:
+                        raise ValueError()
+                    # Re-encode without EXIF/location information or client filenames.
+                    decoded.convert("RGB").save(folder / f"{index:04d}.jpg", quality=90)
+            except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+                raise HTTPException(422, "Upload valid JPEG samples with a maximum edge of 256 pixels.")
+        POOL.submit(run_job, job, request, folder)
+        return {"id": job_id}
+    except BaseException:
+        if job_id:
+            with LOCK:
+                JOBS.pop(job_id, None)
+        if directory:
+            shutil.rmtree(directory, ignore_errors=True)
+        raise
+    finally:
+        for upload in frames:
+            await upload.close()
 
 
 def get_job(job_id):

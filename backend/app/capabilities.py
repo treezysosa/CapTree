@@ -3,7 +3,7 @@ import importlib.util
 import os
 
 
-def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=None, restoration_loaded=False, face_models_ready=None):
+def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=None, restoration_loaded=False, face_models_ready=None, highlights_loaded=False, clip_models_ready=None):
     packages = installed if installed is not None else {name: importlib.util.find_spec(name) is not None for name in ("torch", "diffusers", "transformers", "faster_whisper", "gfpgan", "facexlib", "cv2", "basicsr")}
     if face_models_ready is None:
         from .face_restoration import models_present
@@ -32,6 +32,12 @@ def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=
     face_packages = all(packages.get(name, False) for name in ("torch", "gfpgan", "facexlib", "cv2", "basicsr"))
     reason = "Install the optional face-restoration packages." if not face_packages else "Configure all three face-model files in RETRO_FACE_MODEL_DIR." if not face_models_ready else ""
     result.append({"id": "face-restoration", "supported": not reason, "state": "unsupported" if reason else "ready" if restoration_loaded else "not_loaded", "reason": reason or ("GFPGAN loaded on CPU; restores the central face." if restoration_loaded else "CPU dependencies and weights detected; inference has not yet been verified."), "model": "GFPGAN v1.4 (clean)", "requires_cuda": False})
+    if clip_models_ready is None:
+        from pathlib import Path
+        folder = Path(os.environ.get("RETRO_CLIP_MODEL_DIR", ""))
+        clip_models_ready = bool(os.environ.get("RETRO_CLIP_MODEL_DIR", "").strip()) and all((folder / name).is_file() for name in ("config.json", "preprocessor_config.json", "tokenizer_config.json", "vocab.json", "merges.txt")) and any((folder / name).is_file() for name in ("model.safetensors", "pytorch_model.bin"))
+    reason = "Install the optional CLIP packages." if not all(packages.get(n, False) for n in ("torch", "transformers")) else "Configure a downloaded CLIP model in RETRO_CLIP_MODEL_DIR." if not clip_models_ready else ""
+    result.append({"id": "semantic-highlights", "supported": not reason, "state": "unsupported" if reason else "ready" if highlights_loaded else "not_loaded", "reason": reason or ("CLIP loaded on CPU; ranks sampled still frames by visual relevance." if highlights_loaded else "CLIP files detected; inference has not yet been verified."), "model": "openai/clip-vit-base-patch32", "requires_cuda": False})
     return result
 
 

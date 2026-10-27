@@ -1,0 +1,36 @@
+name: Validate pretrained visual highlights
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/highlights.py'
+      - 'backend/requirements-highlights.txt'
+      - 'tools/validate_highlight_model.py'
+      - '.github/workflows/highlight-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: clip-model-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r backend/requirements-highlights.txt scikit-image==0.25.2
+      - run: python tools/validate_highlight_model.py
+        env:
+          PYTHONPATH: .
+          HF_HUB_DISABLE_TELEMETRY: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-clip-highlights-validation
+          path: model-validation/highlights/
+          retention-days: 14
