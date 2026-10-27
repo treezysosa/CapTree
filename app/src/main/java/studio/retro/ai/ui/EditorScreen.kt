@@ -7,6 +7,8 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -107,7 +109,7 @@ import java.io.File
     LazyRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
         items(e.clips.size,key={e.clips[it].id}) { index ->
             val clip=e.clips[index]
-            Column(Modifier.widthIn(min=106.dp,max=180.dp).background(if(index==e.selectedClip)colors.shell else Navy,RoundedCornerShape(5.dp)).border(2.dp,if(index==e.selectedClip)colors.lcd else colors.accent,RoundedCornerShape(5.dp)).clickable { vm.selectClip(index) }.padding(10.dp)) {
+            Column(Modifier.widthIn(min=106.dp,max=180.dp).background(if(index==e.selectedClip)colors.shell else Navy,RoundedCornerShape(5.dp)).border(2.dp,if(index==e.selectedClip)colors.lcd else colors.accent,RoundedCornerShape(5.dp)).selectable(selected=index==e.selectedClip,role=Role.Tab,onClick={ vm.selectClip(index) }).padding(10.dp)) {
                 PixelText("CLIP ${index+1}",size=8)
                 Text("${"%.2f".format(clip.startMs/1000.0)}–${"%.2f".format(clip.endMs/1000.0)}s",fontSize=11.sp)
             }

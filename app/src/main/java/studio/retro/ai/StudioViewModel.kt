@@ -167,7 +167,6 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val e=editor.value; require(e.tool=="clipper" && e.clips.isNotEmpty()) { "Import a clip first." }
         val clips=Timeline.split(e.clips,e.selectedClip,e.playheadMs)
         editor.value=e.copy(clips=clips,end="${clips[e.selectedClip].endMs/1000.0}")
-        message.value="Clip split at the playhead. Both pieces are now editable in the timeline."
     }
     fun selectClip(index:Int) {
         val e=editor.value; val clip=e.clips.getOrNull(index) ?: return

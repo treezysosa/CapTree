@@ -37,11 +37,12 @@ class StudioSmokeTest {
             }
             compose.waitUntil(10000) { vm.editor.value.playheadMs in 800L..1600L }
             compose.onNodeWithText("SPLIT AT PLAYHEAD").performScrollTo().performClick()
-            compose.onNodeWithText("A · OK").performClick()
             compose.runOnIdle { assertEquals(2,vm.editor.value.clips.size); assertEquals(2400L,vm.editor.value.clips.sumOf { it.durationMs }) }
             compose.onNodeWithText("CLIP 2").performScrollTo().performClick()
+            compose.waitUntil(5000) { vm.editor.value.selectedClip==1 }
+            compose.onNodeWithText("CLIP 2").assertIsSelected()
             val selectedId=vm.editor.value.clips[1].id
-            compose.onNodeWithText("← MOVE").performScrollTo().performClick()
+            compose.onNodeWithText("← MOVE").performScrollTo().assertIsEnabled().performClick()
             compose.runOnIdle { assertEquals(selectedId,vm.editor.value.clips[0].id); assertEquals(0,vm.editor.value.selectedClip) }
         } finally { compose.runOnIdle { cleanup?.back() }; file.delete() }
     }
