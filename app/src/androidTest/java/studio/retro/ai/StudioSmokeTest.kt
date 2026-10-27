@@ -69,4 +69,28 @@ class StudioSmokeTest {
             compose.onNodeWithText("CHOOSE YOUR POWER").assertExists()
         } finally { compose.runOnIdle { cleanup?.back() }; file.delete() }
     }
+
+    @Test fun clipSuggestionsScanRealMediaAndApplyTheirRange() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext()
+        val file=File(app.cacheDir,"ui-suggestions.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("fixture.mp4").use { source -> file.outputStream().use { source.copyTo(it) } }
+        lateinit var vm:StudioViewModel
+        var cleanup:StudioViewModel?=null
+        try {
+            compose.runOnIdle {
+                vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; cleanup=vm
+                vm.open("clipper")
+                vm.editor.value=vm.editor.value.copy(inputs=listOf(file.path),video=true,start="0",end="2.4",clips=listOf(ClipEdit(file.path,0,2400,2400)))
+            }
+            compose.onNodeWithText("SUGGEST CLIP RANGES").performScrollTo().performClick()
+            compose.waitUntil(30000) { vm.editor.value.suggestedClips.isNotEmpty() && !vm.importing.value }
+            val suggested=vm.editor.value.suggestedClips.first()
+            compose.onNodeWithText("USE THIS RANGE").performScrollTo().performClick()
+            compose.runOnIdle {
+                assertEquals(suggested.startMs,vm.editor.value.clips.first().startMs)
+                assertEquals(suggested.endMs,vm.editor.value.clips.first().endMs)
+                assertTrue(vm.editor.value.suggestedClips.isEmpty())
+            }
+        } finally { compose.runOnIdle { cleanup?.back() }; file.delete() }
+    }
 }

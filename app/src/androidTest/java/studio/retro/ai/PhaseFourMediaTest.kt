@@ -61,6 +61,33 @@ class PhaseFourMediaTest {
         } finally { input.delete(); mp4.delete() }
     }
 
+    @Test fun videoOverlaysEncodeAndTimedCaptionsDisappear():Unit=runBlocking {
+        val image=photo(); val input=output("mp4"); val mp4=output("mp4")
+        try {
+            withTimeout(90000) {
+                VideoEngine.imagesToMp4(app,List(10){image},input,10,AnimationOptions(10,1f,160)) {}
+                VideoEngine.export(app,listOf(Segment(input,0,950)),mp4,"Original",0f,listOf(CaptionCue(0,400,"RETRO VIBES")),animation=AnimationOptions(10,1f,160,sticker="★")) {}
+            }
+            val reader=MediaMetadataRetriever()
+            try {
+                reader.setDataSource(mp4.path)
+                fun pixels(timeUs:Long):Pair<Int,Int> {
+                    val bitmap=requireNotNull(reader.getFrameAtTime(timeUs,MediaMetadataRetriever.OPTION_CLOSEST))
+                    var top=0; var bottom=0
+                    for(y in 0 until bitmap.height)for(x in 0 until bitmap.width) {
+                        val c=bitmap.getPixel(x,y)
+                        if((c ushr 16 and 255)>180 && (c ushr 8 and 255)>180 && (c and 255)>180) { if(y<bitmap.height/2)top++ else bottom++ }
+                    }
+                    bitmap.recycle(); return top to bottom
+                }
+                val active=pixels(200000); val expired=pixels(700000)
+                assertTrue("Video sticker is visibly encoded",active.first>8 && expired.first>8)
+                assertTrue("Timed video caption is visibly encoded",active.second>15)
+                assertEquals("Expired caption leaves the lower frame clear",0,expired.second)
+            } finally { reader.release() }
+        } finally { image.delete(); input.delete(); mp4.delete() }
+    }
+
     @Test fun stabilizationReducesMeasuredJitterInKnownShakyFootage():Unit=runBlocking {
         val input=fixture("shaky.mp4"); val mp4=output("mp4")
         try {

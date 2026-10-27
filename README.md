@@ -23,13 +23,13 @@ GitHub Actions builds the APK on each push. Open **Actions → Build Android APK
 | AI Photo Upscaler | Real-ESRGAN-compatible ONNX inference on the phone, tiled RGB processing, 2×/4× output, noise reduction and sharpening. User imports the licensed model; see [model setup](docs/MODELS.md). |
 | AI Video Generator | Actual self-hosted Diffusers CogVideoX inference, text-to-video or image-to-video, progress from diffusion callbacks, cancellation, MP4 preview/export. CUDA server required. |
 | AI Photo Generator | Self-hosted Stable Diffusion 1.5 text-to-image / image-to-image, styles, negative prompts, seeds, generation history. |
-| AI Clipper | Offline editable clip timeline, per-clip trim/split/reorder, H.264/AAC merge, crop, automatic server-based subtitles with audio-only consent, editable SRT caption import/export, scene-cut and quiet-audio suggestions. |
-| Auto Enhance | Offline histogram / white-balance photo correction, denoise and sharpening; GPU brightness/contrast/saturation, spatial denoising and sharpening for video; draggable photo comparison. |
-| AI GIF Generator | Offline video/images → genuine animated GIF, timing, dimensions, speed, captions, stickers, loop flag, or MP4. Optional AI text → GIF through generated video frames. |
+| AI Clipper | Offline editable clip timeline, per-clip trim/split/reorder, H.264/AAC merge, crop, automatic server-based subtitles with audio-only consent, editable SRT, scene/quiet-audio scans and actionable clip-range suggestions. |
+| Auto Enhance | Offline histogram / white-balance photo correction, denoise and sharpening; GPU brightness/contrast/saturation, spatial denoising, sharpening and translation-only stabilization for video; draggable photo comparison. |
+| AI GIF Generator | Offline video/images → LZW-compressed animated GIF or MP4, timing, dimensions, speed, captions and stickers. GIF supports loop control and one-shot preview. Optional AI text → GIF through generated video frames. |
 
 Three persistent console themes, D-pad/A/B/START/SELECT navigation, Android Photo Picker imports, private Room projects, DataStore settings, WorkManager jobs, native previews, save-to-gallery, Android share sheet, and SAF export are included. Android 8–9 uses **Export File** for scoped file creation; direct Gallery save needs Android 10+.
 
-See [feature boundaries and verification](docs/STATUS.md), [backend setup](docs/BACKEND.md), and [privacy](docs/PRIVACY.md). Version 0.3 adds [Phase 3 AI validation and automatic subtitles](docs/PHASE_3.md), on-device ONNX diagnostics, and truthful server readiness. CUDA video-model and physical-phone validation remain, along with the documented advanced editing limits. Unsupported model-dependent operations are described explicitly; no simulated AI outputs or progress.
+See [feature boundaries and verification](docs/STATUS.md), [backend setup](docs/BACKEND.md), and [privacy](docs/PRIVACY.md). Version 0.4 adds [Phase 4 offline motion and animation exports](docs/PHASE_4.md): translation stabilization, GIF compression, MP4 styling/speed and signal-based clip ranges. [Phase 3](docs/PHASE_3.md) covers genuine AI validation, automatic subtitles, on-device ONNX diagnostics and server readiness. CUDA video-model and physical-phone validation remain, along with the documented advanced editing limits. Unsupported model-dependent operations are described explicitly; no simulated AI outputs or progress.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ python -m pip install -r backend/requirements-test.txt
 python -m pytest backend/tests -q
 ```
 
-Unit tests decode the generated GIF with an independent reader and check frame count, colors, frame timing, trimming, memory limits, timeline splits/order, and SRT timing. CI also runs real codec/GPU/WorkManager and UI instrumentation tests on Android 10 and Android 15 emulators. Backend tests validate authentication, untrusted uploads, request validation, the asynchronous job protocol, result download, and deletion. GPU model inference is not mocked in production; tests use a small deterministic engine solely to exercise the protocol without downloading multi-GB models.
+Unit tests decode the generated GIF with an independent reader and check compression, colors, timing, trimming, memory limits, timeline splits/order, SRT timing, motion math and clip-range ranking. CI also runs real codec/GPU/WorkManager and UI instrumentation tests on Android 10 and Android 15 emulators, including encoded overlays, speed/audio alignment, stabilization and one-shot GIF playback. Backend tests validate authentication, untrusted uploads, request validation, the asynchronous job protocol, result download, and deletion. GPU model inference is not mocked in production; tests use a small deterministic engine solely to exercise the protocol without downloading multi-GB models.
 
 ## Pretrained-model verification
 
