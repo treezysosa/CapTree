@@ -36,6 +36,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
     val busyPercent by vm.busyPercent.collectAsStateWithLifecycle()
     val transferActive by vm.transferActive.collectAsStateWithLifecycle()
     val backendReport by vm.backendReport.collectAsStateWithLifecycle()
+    val drafts by vm.automaticDrafts.collectAsStateWithLifecycle()
     var selected by remember { mutableIntStateOf(0) }
     val haptic=LocalHapticFeedback.current
     val tone=remember { runCatching { ToneGenerator(AudioManager.STREAM_MUSIC,25) }.getOrNull() }
@@ -60,7 +61,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when(route) {
-                    "home" -> Home(selected) { i -> selected=i; feedback(); vm.open(ToolIds[i]) }
+                    "home" -> Home(selected,drafts.isNotEmpty(),{ drafts.firstOrNull()?.let { vm.restoreDraft(it.id) } }) { i -> selected=i; feedback(); vm.open(ToolIds[i]) }
                     "editor" -> EditorScreen(vm,editor)
                     "projects" -> ProjectsScreen(vm,false)
                     "gallery" -> ProjectsScreen(vm,true)
@@ -84,7 +85,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
         if(message.isNotBlank()) AlertDialog(onDismissRequest={ vm.message.value="" },title={ PixelText("CONSOLE NOTICE",color=c.lcd) },text={ Text(message) },confirmButton={ TextButton({ vm.message.value="" }) { Text("A · OK") } })
     }
 }
-@Composable private fun Home(selected:Int,onOpen:(Int)->Unit) {
+@Composable private fun Home(selected:Int,hasDraft:Boolean,onContinue:()->Unit,onOpen:(Int)->Unit) {
     val c=LocalConsole.current
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { PixelText("CHOOSE YOUR POWER",color=c.lcd,size=8); Text("06",color=c.accent,fontSize=12.sp) }
@@ -98,6 +99,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
                 }
             }
         }
+        if(hasDraft)RaisedButton("CONTINUE LAST DRAFT",onContinue,Modifier.fillMaxWidth(),c.pink)
         Text("D-PAD TO EXPLORE  •  A TO ENTER",color=c.accent,fontSize=9.sp)
     }
 }

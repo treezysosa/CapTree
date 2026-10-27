@@ -22,7 +22,7 @@ object ProjectArchive {
     private val tools=setOf("upscale","video","photo","clipper","enhance","gif","aigif","transcribe","highlights")
     private val mimes=setOf("image/jpeg","image/png","image/webp","image/gif","video/mp4","application/x-subrip","application/json")
     private val extensions=setOf("jpg","jpeg","png","webp","gif","mp4","mov","mkv","webm","srt","json")
-    private val scalars=setOf("tool","video","start","end","fps","speed","width","loop","caption","sticker","format","scale","intensity","denoise","sharpen","prompt","negative","style","aspect","seed","duration","motion","captions","transcription_language","selected_clip","stabilize","gif_palette","gif_dither","face_restore","face_strength","face_restoration_applied","transcribe_index","caption_offset","quality","highlight_prompt","highlight_clip_ms","highlight_index","speech_engine","speech_model","speech_model_sha256")
+    private val scalars=setOf("tool","video","start","end","fps","speed","width","loop","caption","sticker","format","scale","intensity","denoise","sharpen","prompt","negative","style","aspect","seed","duration","motion","captions","transcription_language","selected_clip","stabilize","gif_palette","gif_dither","face_restore","face_strength","face_restoration_applied","transcribe_index","caption_offset","quality","highlight_prompt","highlight_clip_ms","highlight_index","speech_engine","speech_model","speech_model_sha256","draft_start","draft_end","draft_seed")
     private data class Asset(val key:String,val file:File,val size:Long,val hash:String,val crc:Long)
     fun interruptedStaging(filesRoot:File):List<File> {
         val directory=File(filesRoot,"restore-temp").canonicalFile

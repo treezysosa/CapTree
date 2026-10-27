@@ -33,10 +33,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     val confirmFace by vm.faceConfirmation.collectAsStateWithLifecycle()
     val confirmHighlights by vm.highlightConfirmation.collectAsStateWithLifecycle()
     val speechInstalled by vm.speechInstalled.collectAsStateWithLifecycle()
+    val autosave by vm.autosaveStatus.collectAsStateWithLifecycle()
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText(title,color=LocalConsole.current.lcd,size=10)
+        if(autosave.isNotBlank())Text(autosave,fontSize=10.sp,color=if(autosave.startsWith("AUTO-SAVE PAUSED"))LocalConsole.current.pink else LocalConsole.current.accent)
+        if(autosave.startsWith("AUTO-SAVE PAUSED"))RaisedButton("RETRY AUTO-SAVE",{ vm.flushAutosave() })
         Text(if(isAI)"REMOTE AI · your self-hosted server" else if(e.faceRestore && !e.video)"LOCAL EDIT + REMOTE FACE AI · upload confirmation required" else if(e.tool=="upscale")"LOCAL AI · imported Real-ESRGAN ONNX model" else "OFFLINE · conventional media processing",color=LocalConsole.current.accent,fontSize=11.sp)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             RaisedButton("UNDO",vm::undo,Modifier.weight(1f),enabled=canUndo && !importing)

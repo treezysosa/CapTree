@@ -23,6 +23,7 @@ import kotlinx.coroutines.withContext
 
 @Composable fun ProjectsScreen(vm:StudioViewModel,gallery:Boolean) {
     val projects by vm.projects.collectAsStateWithLifecycle()
+    val drafts by vm.automaticDrafts.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf("All") }
     var opened by remember { mutableStateOf<String?>(null) }
     var rename by remember { mutableStateOf<Project?>(null) }
@@ -30,7 +31,7 @@ import kotlinx.coroutines.withContext
     var backupProject by remember { mutableStateOf<Project?>(null) }
     val backupPicker=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> val project=backupProject; backupProject=null; if(uri!=null && project!=null)vm.backup(project,uri) }
     val importPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.importBackup(uri) }
-    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Highlights"->it.tool=="highlights"; "Favorites"->it.favorite; else->true } }
+    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Autosaves"->false; "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Highlights"->it.tool=="highlights"; "Favorites"->it.favorite; else->true } }
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         PixelText(if(gallery)"PIXEL GALLERY" else "SAVE GAME MENU",color=LocalConsole.current.lcd)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("PROJECTS",{ vm.screen.value="projects" },Modifier.weight(1f)); RaisedButton("GALLERY",{ vm.screen.value="gallery" },Modifier.weight(1f)) }
@@ -38,9 +39,20 @@ import kotlinx.coroutines.withContext
             RaisedButton("IMPORT PROJECT BACKUP",{ importPicker.launch(arrayOf("application/zip","application/octet-stream","*/*")) },Modifier.fillMaxWidth())
             Text("Backups contain media and edits. Server settings, credentials and model weights are excluded.",fontSize=11.sp)
         }
-        Choice("FILTER",listOf("All","Photos","Videos","GIFs","Captions","Highlights","Favorites"),filter) { filter=it }
-        if(visible.isEmpty())Text("Your save slots are empty. Press START to create something.",fontSize=14.sp)
+        Choice("FILTER",if(gallery)listOf("All","Photos","Videos","GIFs","Captions","Highlights","Favorites") else listOf("All","Autosaves","Photos","Videos","GIFs","Captions","Highlights","Favorites"),filter) { filter=it }
+        if(visible.isEmpty() && (gallery || drafts.isEmpty() || filter !in setOf("All","Autosaves")))Text("Your save slots are empty. Press START to create something.",fontSize=14.sp)
         LazyColumn(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            if(!gallery && filter in setOf("All","Autosaves")) {
+                if(drafts.isNotEmpty())item { Text("AUTOMATIC DRAFTS · include undo/redo on this device",fontSize=11.sp,color=LocalConsole.current.accent) }
+                items(drafts,key={"draft-${it.id}"}) { draft ->
+                    ConsolePanel(Modifier.fillMaxWidth()) {
+                        Text(draft.label,color=LocalConsole.current.accent,fontSize=14.sp)
+                        Text(java.text.SimpleDateFormat("MMM dd HH:mm:ss",java.util.Locale.getDefault()).format(java.util.Date(draft.updated)),fontSize=11.sp)
+                        RaisedButton("RESTORE AUTO-SAVE",{ vm.restoreDraft(draft.id) },Modifier.fillMaxWidth())
+                        Row { TextButton({ vm.keepDraft(draft.id) }) { Text("KEEP AS PROJECT",fontSize=10.sp) }; TextButton({ vm.discardDraft(draft.id) }) { Text("DISCARD DRAFT",fontSize=10.sp) } }
+                    }
+                }
+            }
             items(visible,key={it.id}) { p ->
                 ConsolePanel(Modifier.fillMaxWidth()) {
                     Text(p.name,color=LocalConsole.current.accent,fontSize=15.sp)

@@ -24,3 +24,4 @@ clip-model/
 .venv-highlights/
 app/src/androidTest/assets/speech-validation/
 offline-speech-device/
+process-recovery/

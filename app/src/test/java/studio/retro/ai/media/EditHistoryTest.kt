@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EditHistoryTest {
+    @Test fun restoredHistoryKeepsTheRedoOrderAndStartsANewTypingGroup() {
+        val first=EditHistory<String>(); first.record("","a","typing",100); first.record("a","b","separate",200); assertEquals("a",first.undo("b"))
+        val restored=EditHistory<String>(); restored.restore(first.snapshot())
+        assertTrue(restored.canUndo && restored.canRedo); assertEquals("b",restored.redo("a")); assertEquals("a",restored.undo("b"))
+        restored.record("a","c","typing",201); assertFalse(restored.canRedo); assertEquals("a",restored.undo("c"))
+    }
     @Test fun typingCoalescesAndUndoRedoPreserveBothEndsOfTheEdit() {
         val h=EditHistory<String>()
         h.record("","h","text",100); h.record("h","hi","text",200)

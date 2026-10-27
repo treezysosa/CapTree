@@ -1,0 +1,54 @@
+name: Validate editor process recovery
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recovery-validation.yml'
+      - 'app/src/main/java/studio/retro/ai/data/EditorCheckpoints.kt'
+      - 'app/src/main/java/studio/retro/ai/data/DraftWriter.kt'
+      - 'app/src/main/java/studio/retro/ai/data/StudioDatabase.kt'
+      - 'app/src/main/java/studio/retro/ai/StudioViewModel.kt'
+      - 'app/src/main/java/studio/retro/ai/media/EditHistory.kt'
+      - 'app/src/main/java/studio/retro/ai/MainActivity.kt'
+      - 'app/src/androidTest/java/studio/retro/ai/PhaseNineProcessTest.kt'
+      - 'tools/run_recovery_tests.sh'
+      - 'tools/check_instrumentation_result.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: draft-recovery-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 256M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 2048
+          script: bash tools/run_recovery_tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-process-recovery-api-${{ matrix.api }}
+          path: process-recovery/
+          retention-days: 14

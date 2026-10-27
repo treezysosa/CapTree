@@ -7,6 +7,11 @@ import studio.retro.ai.EditorState
 import studio.retro.ai.data.Preferences
 
 class EditorRecipeTest {
+    @Test fun unfinishedProjectFieldsRemainEditableAfterAResume() {
+        val recipe=EditorState(tool="clipper").recipe(Preferences()).put("draft_start","0.").put("draft_end","").put("draft_seed","00123")
+        val restored=EditorState.restore("clipper",recipe.toString())
+        assertEquals("0.",restored.start); assertEquals("",restored.end); assertEquals("00123",restored.seed)
+    }
     @Test fun savedSplitClipsRetainTheirOriginAndAdaptiveColorOptions() {
         val clips=Timeline.split(listOf(ClipEdit("/local/input.mp4",0,3000,3000)),0,1500)
         val state=EditorState(tool="clipper",inputs=listOf("/local/input.mp4"),video=true,clips=clips,gifPalette="Adaptive 64",gifDither=true)

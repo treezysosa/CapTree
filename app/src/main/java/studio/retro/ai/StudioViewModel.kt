@@ -66,7 +66,7 @@ data class EditorState(
             val sourceCues=if(sourceArray==null)emptyList() else List(sourceArray.length()) { i -> val cue=sourceArray.getJSONObject(i); CaptionCue(cue.getLong("start"),cue.getLong("end"),cue.getString("text")) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues,faceRestore=r.optBoolean("face_restore"),faceStrength=r.optDouble("face_strength",0.7).toFloat(),highlightPrompt=r.optString("highlight_prompt"),highlightSeconds=(r.optLong("highlight_clip_ms",6000)/1000).toInt().coerceIn(1,15))
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues,faceRestore=r.optBoolean("face_restore"),faceStrength=r.optDouble("face_strength",0.7).toFloat(),highlightPrompt=r.optString("highlight_prompt"),highlightSeconds=(r.optLong("highlight_clip_ms",6000)/1000).toInt().coerceIn(1,15)).let { state -> state.copy(start=r.optString("draft_start",state.start),end=r.optString("draft_end",state.end),seed=r.optString("draft_seed",state.seed)) }
         }
     }
 }
@@ -78,6 +78,12 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val settings=app.settings
     val prefs=settings.flow.stateIn(viewModelScope,SharingStarted.Eagerly,Preferences())
     val projects=dao.observe().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList())
+    private val sessionDao=app.database.sessions()
+    val automaticDrafts=sessionDao.observe().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList())
+    val autosaveStatus=MutableStateFlow("")
+    private var draftId=UUID.randomUUID().toString()
+    private var draftRevision=0L
+    private var autosaveJob:Job?=null
     val screen=MutableStateFlow("home")
     val editor=MutableStateFlow(EditorState())
     val message=MutableStateFlow("")
@@ -99,8 +105,75 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     private fun updateHistory() { canUndo.value=history.canUndo; canRedo.value=history.canRedo }
     private fun clearHistory() { history.clear(); updateHistory(); faceConfirmation.value=false; highlightConfirmation.value=null }
     private fun snapshot(e:EditorState)=e.copy(playheadMs=0,previewRequestMs=null,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0)
-    fun open(tool:String) { clearHistory(); editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
-    fun back() { faceConfirmation.value=false; highlightConfirmation.value=null; screen.value="home" }
+    private fun workspace(state:EditorState) {
+        flushAutosave(); clearHistory(); draftId=UUID.randomUUID().toString(); draftRevision=0; autosaveStatus.value=""; editor.value=state
+    }
+    fun open(tool:String) { workspace(EditorCheckpoints.empty(tool)); screen.value="editor" }
+    fun back() { flushAutosave(); faceConfirmation.value=false; highlightConfirmation.value=null; screen.value="home" }
+    private data class PendingDraft(val id:String,val revision:Long,val value:EditorCheckpoint,val edited:Long=System.currentTimeMillis())
+    private fun captureDraft():PendingDraft? {
+        val value=EditorCheckpoint(EditorCheckpoints.durable(editor.value),history.snapshot())
+        if(!EditorCheckpoints.meaningful(value))return null
+        draftRevision=app.draftWriter.revision(draftRevision)
+        autosaveStatus.value="AUTO-SAVING..."
+        return PendingDraft(draftId,draftRevision,value)
+    }
+    private fun submitDraft(pending:PendingDraft):Job {
+        val retained=app.draftWriter.retain(pending.id,pending.revision,EditorCheckpoints.paths(pending.value))
+        return app.draftScope.launch {
+        try {
+            val (payload,value)=EditorCheckpoints.encode(pending.value)
+            val root=File(app.filesDir,"imports").canonicalPath+File.separator
+            require(EditorCheckpoints.paths(value).all { path -> File(path).canonicalPath.startsWith(root) && File(path).isFile }) { "Draft media is missing or outside private imports." }
+            val record=EditorSession(pending.id,value.current.tool,payload,EditorCheckpoints.media(value),pending.revision,pending.edited,"${value.current.tool.uppercase()} · ${value.current.inputs.size} MEDIA")
+            val saved=app.draftWriter.save(record)
+            withContext(Dispatchers.Main) {
+                if(draftId==pending.id && draftRevision==pending.revision)autosaveStatus.value=if(saved)"AUTO-SAVED${if(value.historyLimited)" · HISTORY LIMITED" else ""}" else "AUTO-SAVE SKIPPED · A NEWER DRAFT EXISTS"
+            }
+        } catch(e:Exception) {
+            if(e is CancellationException)throw e
+            withContext(Dispatchers.Main) { if(draftId==pending.id && draftRevision==pending.revision)autosaveStatus.value="AUTO-SAVE PAUSED · ${e.message ?: "Storage unavailable"}" }
+        } finally { app.draftWriter.release(retained) }
+        }
+    }
+    private fun scheduleAutosave() {
+        autosaveJob?.cancel()
+        val pending=captureDraft() ?: return
+        autosaveJob=viewModelScope.launch { delay(500); submitDraft(pending) }
+    }
+    /** Also used by onStop; the application scope completes writes after activity recreation. */
+    fun flushAutosave():Job {
+        autosaveJob?.cancel(); autosaveJob=null
+        val pending=captureDraft()
+        return if(pending==null)app.draftScope.launch {} else submitDraft(pending)
+    }
+    fun restoreDraft(id:String) = launch {
+        require(!importing.value) { "Wait for current processing to finish." }
+        flushAutosave().join()
+        val record=sessionDao.get(id) ?: error("This automatic draft was deleted.")
+        val (value,past,future)=withContext(Dispatchers.IO) {
+            val value=EditorCheckpoints.decode(record.payload)
+            val root=File(app.filesDir,"imports").canonicalPath+File.separator
+            fun available(state:EditorState)=EditorCheckpoints.paths(EditorCheckpoint(state,HistorySnapshot())).all { File(it).canonicalPath.startsWith(root) && File(it).isFile }
+            require(available(value.current)) { "The draft's imported media is missing. Restore a portable project backup if available." }
+            Triple(value,value.history.past.filter(::available),value.history.future.filter(::available))
+        }
+        autosaveJob?.cancel(); clearHistory(); draftId=id; draftRevision=record.revision
+        history.restore(HistorySnapshot(past,future)); updateHistory(); editor.value=value.current
+        autosaveStatus.value=if(value.historyLimited || past.size!=value.history.past.size || future.size!=value.history.future.size)"RECOVERED DRAFT · SOME HISTORY UNAVAILABLE" else "RECOVERED AUTO-SAVE"
+        screen.value="editor"
+    }
+    fun discardDraft(id:String) = launch {
+        if(draftId==id) { autosaveJob?.cancel(); clearHistory(); editor.value=EditorCheckpoints.empty(editor.value.tool); draftId=UUID.randomUUID().toString(); draftRevision=0; autosaveStatus.value="" }
+        app.draftWriter.delete(id)
+    }
+    fun keepDraft(id:String) = launch {
+        val record=sessionDao.get(id) ?: error("This automatic draft was deleted.")
+        val state=withContext(Dispatchers.IO) { EditorCheckpoints.decode(record.payload).current }
+        val recipe=state.recipe(Preferences()).put("draft_start",state.start).put("draft_end",state.end).put("draft_seed",state.seed)
+        dao.save(Project(UUID.randomUUID().toString(),"${record.label} · KEPT DRAFT",state.tool,recipe.toString()))
+        message.value="Draft kept in Save Games. Use BACKUP PROJECT there to save a portable copy. Undo history remains with the automatic draft on this device."
+    }
     private fun trim(e:EditorState):ClipEdit? {
         val clip=e.clips.getOrNull(e.selectedClip) ?: return null
         val start=e.start.toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 && it<=clip.sourceDurationMs/1000.0 } ?: return null
@@ -125,11 +198,12 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             }
             history.record(snapshot(old),snapshot(next),group,android.os.SystemClock.uptimeMillis())
             editor.value=next; updateHistory()
+            if(snapshot(old)!=snapshot(next))scheduleAutosave()
         } catch(e:Exception) { message.value=e.message ?: "This edit could not be applied." }
     }
     private fun restoreHistory(state:EditorState) {
         val index=state.selectedClip.coerceIn(0,state.clips.lastIndex.coerceAtLeast(0)); val clip=state.clips.getOrNull(index)
-        editor.value=state.copy(selectedClip=index,playheadMs=clip?.startMs ?: 0,previewRequestMs=clip?.startMs,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0); updateHistory()
+        editor.value=state.copy(selectedClip=index,playheadMs=clip?.startMs ?: 0,previewRequestMs=clip?.startMs,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0); updateHistory(); scheduleAutosave()
     }
     fun undo() { if(!importing.value)history.undo(snapshot(editor.value))?.let(::restoreHistory) }
     fun redo() { if(!importing.value)history.redo(snapshot(editor.value))?.let(::restoreHistory) }
@@ -199,6 +273,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun create(draft:Boolean=false,faceConfirmed:Boolean=false) = launch {
         require(!importing.value) { "Wait for the current import or model test to finish." }
+        flushAutosave()
         val e=editor.value
         if(!draft) {
             if(e.tool in setOf("photo","video","aigif")) { require(e.prompt.isNotBlank()) { "Enter a prompt." }; require(prefs.value.backend.isNotBlank() && prefs.value.remoteConsent) { "Set up an HTTPS backend and allow remote processing in Settings." } }
@@ -217,6 +292,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         }
         faceConfirmation.value=false
         val recipe=e.recipe(prefs.value).put("face_upload_confirmed",!draft && faceConfirmed && e.faceRestore)
+        if(draft)recipe.put("draft_start",e.start).put("draft_end",e.end).put("draft_seed",e.seed)
         val p=Project(UUID.randomUUID().toString(),"${e.tool.uppercase()} · ${java.text.SimpleDateFormat("MMM dd HH:mm",java.util.Locale.US).format(java.util.Date())}",e.tool,recipe.toString())
         if(draft) { dao.save(p); message.value="Saved in projects." } else enqueue(p)
     }
@@ -230,14 +306,14 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             val clips=withContext(Dispatchers.IO) { restored.inputs.mapIndexed { index,path -> val d=VideoEngine.duration(File(path)); ClipEdit(path,if(index==0)((restored.start.toDoubleOrNull() ?: 0.0)*1000).toLong() else 0,if(index==0)((restored.end.toDoubleOrNull() ?: d/1000.0)*1000).toLong() else d,d) } }
             state=state.copy(clips=clips,playheadMs=clips.first().startMs)
         }
-        clearHistory(); editor.value=state; screen.value="editor"
+        workspace(state); screen.value="editor"; scheduleAutosave()
     }
     fun retry(project:Project) = launch {
         if(project.tool=="highlights") {
-            clearHistory(); editor.value=EditorState.restore("clipper",project.recipe); screen.value="editor"; semanticHighlights(); return@launch
+            workspace(EditorState.restore("clipper",project.recipe)); screen.value="editor"; scheduleAutosave(); semanticHighlights(); return@launch
         }
         if(JSONObject(project.recipe).let { it.optBoolean("face_restore") && !it.optBoolean("video") } && project.tool in setOf("enhance","upscale")) {
-            clearHistory(); editor.value=EditorState.restore(project.tool,project.recipe); screen.value="editor"; faceConfirmation.value=true
+            workspace(EditorState.restore(project.tool,project.recipe)); screen.value="editor"; scheduleAutosave(); faceConfirmation.value=true
         } else enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output=""))
     }
     fun rename(project:Project,name:String) = launch { dao.rename(project.id,name.take(80).ifBlank { project.name }) }
@@ -308,6 +384,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val e=editor.value; val clip=e.clips.getOrNull(index) ?: return
         history.endGroup()
         editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0)
+        scheduleAutosave()
     }
     fun moveClip(direction:Int) {
         val e=editor.value; if(e.clips.isEmpty())return
@@ -325,6 +402,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         history.endGroup()
         val position=ms.coerceIn(clip.startMs,clip.endMs.coerceAtLeast(clip.startMs))
         editor.value=e.copy(playheadMs=position,previewRequestMs=position)
+        scheduleAutosave()
     }
     fun previewPosition(ms:Long) { val e=editor.value; if(e.tool=="clipper")editor.value=e.copy(playheadMs=ms) }
     fun importCaptions(uri:Uri) = launch {
@@ -339,13 +417,19 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun clean() = launch {
         require(!importing.value) { "Wait for the current import or transfer to finish." }
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
-        val retained=(history.states()+editor.value).flatMap { it.inputs+(it.clips+it.captionSourceClips).map { clip -> clip.path } }.toSet()
-        withContext(Dispatchers.IO) {
-            app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            ProjectArchive.interruptedStaging(app.filesDir).forEach { it.deleteRecursively() }
-            val used=projects.value.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained
-            File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
-        }; message.value="Cache and unused imports cleared."
+        importing.value=true; busyMessage.value="CLEANING STORAGE..."
+        try {
+            flushAutosave().join()
+            val retained=(history.states()+editor.value).flatMap { it.inputs+(it.clips+it.captionSourceClips).map { clip -> clip.path } }.toSet()
+            withContext(Dispatchers.IO) {
+                app.draftWriter.withRetainedMedia { sessions ->
+                    val used=projects.value.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained+sessions
+                    app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                    ProjectArchive.interruptedStaging(app.filesDir).forEach { it.deleteRecursively() }
+                    File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
+                }
+            }; message.value="Cache and unused imports cleared. Automatic drafts and their undo media are kept."
+        } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
     }
     fun testBackend() = launch {
         val origin=prefs.value.backend
@@ -397,8 +481,8 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             val file=File(project.output); require(file.length() in 1..65536) { "Invalid highlight result size." }
             SemanticHighlights.parse(file.readText(),clip.durationMs)
         }
-        clearHistory()
-        editor.value=state.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,semanticClips=result.ranges.map { it.copy(startMs=it.startMs+clip.startMs,endMs=it.endMs+clip.startMs) },semanticSampleCount=result.sampleCount)
+        workspace(state.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,semanticClips=result.ranges.map { it.copy(startMs=it.startMs+clip.startMs,endMs=it.endMs+clip.startMs) },semanticSampleCount=result.sampleCount))
+        scheduleAutosave()
         screen.value="editor"
         message.value="Visual matches loaded on the saved timeline snapshot. Preview a range before applying it. Cosine scores are relative similarity, not confidence."
     }
@@ -437,7 +521,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val duration=state.clips.sumOf { it.durationMs }; val offset=recipe.optLong("caption_offset",0)
         val replacement=withContext(Dispatchers.IO) { CaptionTrack.parse(File(project.output).readText(),duration) }
         val combined=CaptionTrack.replaceRange(CaptionTrack.parse(state.captions,duration),replacement,offset,offset+clip.durationMs)
-        clearHistory(); editor.value=state.copy(captions=CaptionTrack.srt(combined),captionSourceClips=emptyList(),captionSourceCues=emptyList()); screen.value="editor"
+        workspace(state.copy(captions=CaptionTrack.srt(combined),captionSourceClips=emptyList(),captionSourceCues=emptyList())); screen.value="editor"; scheduleAutosave()
         message.value="Subtitles applied to the saved timeline snapshot. Review text and timing before exporting."
     }
 }

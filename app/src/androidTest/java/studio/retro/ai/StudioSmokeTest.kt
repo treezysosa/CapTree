@@ -24,6 +24,20 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class StudioSmokeTest {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
+    @Test fun homeContinueRestoresTheActualAutomaticDraft() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext(); val token="UI DRAFT ${UUID.randomUUID()}"
+        lateinit var vm:StudioViewModel; var saved:String?=null
+        try {
+            compose.runOnIdle { vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; vm.message.value=""; vm.open("photo"); vm.edit { it.copy(prompt=token,seed="00123") } }
+            compose.waitUntil(15000) { vm.autosaveStatus.value.startsWith("AUTO-SAVED") }
+            saved=runBlocking { val dao=app.database.sessions(); dao.observe().first().mapNotNull { dao.get(it.id) }.first { studio.retro.ai.data.EditorCheckpoints.decode(it.payload).current.prompt==token }.id }
+            compose.runOnIdle { vm.open("photo"); vm.back() }
+            compose.onNodeWithText("CONTINUE LAST DRAFT").assertExists().performClick()
+            compose.waitUntil(15000) { vm.editor.value.prompt==token && vm.screen.value=="editor" }
+            compose.onNodeWithText("RECOVERED AUTO-SAVE").assertExists()
+            compose.runOnIdle { assertEquals("00123",vm.editor.value.seed); vm.discardDraft(requireNotNull(saved)); vm.back() }
+        } finally { saved?.let { runBlocking { app.draftWriter.delete(it) } } }
+    }
     @Test fun offlineSubtitlesShowModelReadinessAndOpenTheSpeechSettings() {
         lateinit var vm:StudioViewModel
         compose.runOnIdle {
