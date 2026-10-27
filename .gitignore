@@ -1,0 +1,16 @@
+.gradle/
+.kotlin/
+**/build/
+local.properties
+.idea/
+*.iml
+*.jks
+*.keystore
+__pycache__/
+.pytest_cache/
+.venv/
+backend/outputs/
+backend/models/
+*.onnx
+*.safetensors
+.env

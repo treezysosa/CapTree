@@ -1,0 +1,9 @@
+# Privacy
+
+The app has no account system, advertisements, analytics, tracking SDKs, paid APIs, or watermarking. Android backup is disabled. Selected imports are copied to private app storage; Room stores recipes and project metadata locally. Conventional editing and on-device ONNX processing do not use the network.
+
+Remote generation is off by default. The operator saves an HTTPS URL and token and enables the clearly labeled remote-processing toggle. Changing the URL revokes consent. Starting a remote creation sends its prompt/settings and optional image to that specific server; local paths and tokens are not included in payload JSON. Tokens use Android Keystore AES-GCM. HTTP, invalid certificates, credential-bearing URLs, and redirects are rejected. No hardcoded API secrets.
+
+The optional server requires a bearer token, bounds uploads and queued jobs, validates images, uses generated UUID directories rather than supplied file paths, deletes uploads after inference, and honors cancellation and result purge requests. Completed jobs expire after 24 hours if not purged sooner. Android purges remote results after download. Server operators control their own infrastructure, firewall, model cache, and access logs. Use one backend instance per trusted user/group; the shared token is not multi-tenant authentication. Run behind HTTPS and do not expose the unauthenticated Uvicorn socket to the public Internet.
+
+Save to Gallery, Export File, and Share are explicit user actions. Deleting an app project removes its private output; copies already exported/shared remain outside the app's control. Clear cache removes unused imports referenced by no saved or open project. Uninstall removes private app data and Keystore credentials.
