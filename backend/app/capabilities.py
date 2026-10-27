@@ -3,8 +3,11 @@ import importlib.util
 import os
 
 
-def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=None):
-    packages = installed if installed is not None else {name: importlib.util.find_spec(name) is not None for name in ("torch", "diffusers", "transformers", "faster_whisper")}
+def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=None, restoration_loaded=False, face_models_ready=None):
+    packages = installed if installed is not None else {name: importlib.util.find_spec(name) is not None for name in ("torch", "diffusers", "transformers", "faster_whisper", "gfpgan", "facexlib", "cv2", "basicsr")}
+    if face_models_ready is None:
+        from .face_restoration import models_present
+        face_models_ready = models_present()
     if cuda is None:
         try:
             import torch
@@ -26,6 +29,9 @@ def features(loaded_kind=None, transcription_loaded=False, installed=None, cuda=
         loaded = transcription_loaded if kind == "transcription" else loaded_kind == kind
         state = "unsupported" if reason else "ready" if loaded else "not_loaded"
         result.append({"id": feature, "supported": not reason, "state": state, "reason": reason or ("Model loaded; generation can still fail if resources are insufficient." if loaded else "Prerequisites detected; model weights have not been loaded or verified yet."), "model": model, "requires_cuda": gpu_required})
+    face_packages = all(packages.get(name, False) for name in ("torch", "gfpgan", "facexlib", "cv2", "basicsr"))
+    reason = "Install the optional face-restoration packages." if not face_packages else "Configure all three face-model files in RETRO_FACE_MODEL_DIR." if not face_models_ready else ""
+    result.append({"id": "face-restoration", "supported": not reason, "state": "unsupported" if reason else "ready" if restoration_loaded else "not_loaded", "reason": reason or ("GFPGAN loaded on CPU; restores the central face." if restoration_loaded else "CPU dependencies and weights detected; inference has not yet been verified."), "model": "GFPGAN v1.4 (clean)", "requires_cuda": False})
     return result
 
 

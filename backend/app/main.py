@@ -17,9 +17,10 @@ from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
-from .contracts import Generation, Transcription
+from .contracts import Generation, Transcription, FaceRestoration
 from .inference import GenerationCancelled, InferenceEngine
 from .transcription import TranscriptionEngine, NoSpeechDetected
+from .face_restoration import FaceRestorationEngine, NoFaceDetected
 from .capabilities import features, operation_feature
 
 ROOT = Path(os.environ.get("RETRO_OUTPUT_DIR", "backend/outputs")).resolve()
@@ -28,6 +29,7 @@ LOCK = threading.RLock()
 POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="retro-inference")
 ENGINE = InferenceEngine()
 TRANSCRIBER = TranscriptionEngine()
+RESTORER = FaceRestorationEngine()
 MAX_UPLOAD = 12 * 1024 * 1024
 MAX_AUDIO = 64 * 1024 * 1024
 Image.MAX_IMAGE_PIXELS = 20_000_000
@@ -38,7 +40,7 @@ class Job:
     id: str
     directory: Path
     status: str = "queued"
-    stage: str = "Waiting for GPU"
+    stage: str = "Waiting for inference processor"
     progress: int | None = None
     error: str = ""
     output: Path | None = None
@@ -62,7 +64,8 @@ def run_job(job, request, image):
         if job.cancel.is_set():
             raise GenerationCancelled()
         job.status = "processing"
-        job.output, job.mime = (TRANSCRIBER if isinstance(request, Transcription) else ENGINE).run(request, image, job)
+        engine = TRANSCRIBER if isinstance(request, Transcription) else RESTORER if isinstance(request, FaceRestoration) else ENGINE
+        job.output, job.mime = engine.run(request, image, job)
         if job.cancel.is_set():
             raise GenerationCancelled()
         job.status, job.stage, job.progress = "completed", "Ready", 100
@@ -70,6 +73,8 @@ def run_job(job, request, image):
         job.status, job.stage = "cancelled", "Cancelled"
     except NoSpeechDetected:
         job.status, job.error = "failed", "No speech was detected in the selected audio. Select a clip that contains speech."
+    except NoFaceDetected:
+        job.status, job.error = "failed", "No suitable face was detected. Choose a clear photo with a visible face."
     except Exception as error:
         # Avoid leaking filesystem paths, request data or server credentials.
         job.status, job.error = "failed", f"{type(error).__name__}: model inference failed. Check model installation, license access, and server RAM/VRAM."
@@ -113,12 +118,12 @@ async def lifespan(app):
             job.cancel.set()
 
 
-app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="RETRO AI STUDIO · self-hosted inference", version="0.6.0", lifespan=lifespan)
 
 
 @app.get("/v1/health", dependencies=[Depends(auth)])
 def health():
-    status = features(getattr(ENGINE, "kind", None), getattr(TRANSCRIBER, "model", None) is not None)
+    status = features(getattr(ENGINE, "kind", None), getattr(TRANSCRIBER, "model", None) is not None, restoration_loaded=getattr(RESTORER, "model", None) is not None)
     return {"status": "online", "api_version": 2, "capabilities": [item["id"] for item in status if item["supported"]], "features": status, "progress": "actual model steps or transcribed audio time; indeterminate during loading/encoding"}
 
 
@@ -221,6 +226,55 @@ async def transcribe(payload: str = Form(default='{"tool":"transcribe"}'), audio
         raise
     finally:
         await audio.close()
+
+
+@app.post("/v1/face-restorations", status_code=202, dependencies=[Depends(auth)])
+async def restore_face(payload: str = Form(default='{"tool":"restore-face"}'), image: UploadFile = File(...)):
+    try:
+        if len(payload) > 4096:
+            raise ValueError()
+        request = FaceRestoration.model_validate_json(payload)
+    except (ValueError, ValidationError):
+        raise HTTPException(422, "Invalid face-restoration settings.")
+    capability = next(item for item in features() if item["id"] == "face-restoration")
+    if not capability["supported"]:
+        raise HTTPException(503, capability["reason"])
+    with LOCK:
+        if sum(j.status in ("queued", "processing") for j in JOBS.values()) >= 3 or len(JOBS) >= 100:
+            raise HTTPException(429, "Server queue is full.")
+        job_id = str(uuid.uuid4())
+        directory = ROOT / job_id
+        directory.mkdir(parents=True)
+        job = Job(job_id, directory)
+        JOBS[job_id] = job
+    input_path = directory / "input.png"
+    try:
+        raw = directory / "upload.bin"
+        count = 0
+        with raw.open("wb") as sink:
+            while chunk := await image.read(65536):
+                count += len(chunk)
+                if count > MAX_UPLOAD:
+                    raise HTTPException(413, "Input image exceeds 12 MB.")
+                sink.write(chunk)
+        try:
+            from PIL import ImageOps
+            with Image.open(raw) as decoded:
+                if decoded.width * decoded.height > 20_000_000 or max(decoded.size) > 4096:
+                    raise ValueError()
+                ImageOps.exif_transpose(decoded).convert("RGB").save(input_path)
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+            raise HTTPException(422, "Upload a valid photo of at most 4096 pixels per edge.")
+        raw.unlink(missing_ok=True)
+        POOL.submit(run_job, job, request, input_path)
+        return {"id": job_id}
+    except BaseException:
+        with LOCK:
+            JOBS.pop(job_id, None)
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    finally:
+        await image.close()
 
 
 def get_job(job_id):

@@ -20,3 +20,8 @@ class Generation(BaseModel):
 class Transcription(BaseModel):
     tool: Literal["transcribe"] = "transcribe"
     language: str = Field(default="auto", pattern=r"^(auto|[a-z]{2,3})$")
+
+
+class FaceRestoration(BaseModel):
+    tool: Literal["restore-face"] = "restore-face"
+    strength: float = Field(default=0.7, gt=0, le=1)

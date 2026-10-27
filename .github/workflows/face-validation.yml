@@ -1,0 +1,37 @@
+name: Validate pretrained face restoration
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/face_restoration.py'
+      - 'backend/requirements-face.txt'
+      - 'tools/validate_face_model.py'
+      - '.github/workflows/face-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: face-model-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  gfpgan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r backend/requirements-face.txt scikit-image==0.25.2
+      - run: python tools/validate_face_model.py
+        env:
+          PYTHONPATH: .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-gfpgan-face-validation
+          path: |
+            model-validation/face/
+            backend/licenses/
+          retention-days: 14
