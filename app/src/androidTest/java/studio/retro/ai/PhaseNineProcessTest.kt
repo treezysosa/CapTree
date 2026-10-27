@@ -30,6 +30,8 @@ class PhaseNineProcessTest {
             val uri=FileProvider.getUriForFile(app,"${app.packageName}.files",staged)
             withContext(Dispatchers.Main) { vm.open("clipper"); vm.import(listOf(uri),true) }
             withTimeout(20000) { vm.editor.first { it.inputs.isNotEmpty() } }
+            val originalEnd=vm.editor.value.end
+            val originalDuration=vm.editor.value.clips.single().sourceDurationMs
             withContext(Dispatchers.Main) {
                 vm.edit { it.copy(captions=CaptionTrack.srt(listOf(CaptionCue(300,2200,"RECOVERED CAPTION")))) }
                 vm.edit("valid-trim") { it.copy(end="1.5",seed="00123") }
@@ -42,7 +44,7 @@ class PhaseNineProcessTest {
             val dao=app.database.sessions()
             val session=dao.observe().first().mapNotNull { dao.get(it.id) }.first { EditorCheckpoints.decode(it.payload).current.inputs==listOf(source) }
             assertEquals("1.5",EditorCheckpoints.decode(session.payload).current.end)
-            File(app.filesDir,"phase9-recovery.json").writeText(JSONObject().put("id",session.id).put("source",source).put("sha256",MessageDigest.getInstance("SHA-256").digest(File(source).readBytes()).joinToString("") { "%02x".format(it.toInt() and 255) }).toString())
+            File(app.filesDir,"phase9-recovery.json").writeText(JSONObject().put("id",session.id).put("source",source).put("source_end",originalEnd).put("source_duration_ms",originalDuration).put("sha256",MessageDigest.getInstance("SHA-256").digest(File(source).readBytes()).joinToString("") { "%02x".format(it.toInt() and 255) }).toString())
         } finally { staged.delete() }
     }
     @Test fun verifyCheckpointAndExport():Unit=runBlocking {
@@ -61,7 +63,7 @@ class PhaseNineProcessTest {
         withTimeout(10000) { vm.message.first { it.contains("valid trim times") } }
         withContext(Dispatchers.Main) {
             vm.message.value=""; vm.undo(); assertEquals("1.5",vm.editor.value.end)
-            vm.undo(); assertEquals("2.4",vm.editor.value.end); assertEquals(listOf(CaptionCue(300,2200,"RECOVERED CAPTION")),CaptionTrack.parse(vm.editor.value.captions,2400))
+            vm.undo(); assertEquals(marker.getString("source_end"),vm.editor.value.end); assertEquals(listOf(CaptionCue(300,2200,"RECOVERED CAPTION")),CaptionTrack.parse(vm.editor.value.captions,marker.getLong("source_duration_ms")))
             vm.redo(); assertEquals("1.5",vm.editor.value.end); assertEquals(listOf(CaptionCue(300,1500,"RECOVERED CAPTION")),CaptionTrack.parse(vm.editor.value.captions,1500))
         }
         val blank=withContext(Dispatchers.Main) { StudioViewModel(app) }
