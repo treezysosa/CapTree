@@ -75,6 +75,16 @@ class PhaseNineDraftTest {
             writer.delete("id"); assertFalse(writer.save(newer.copy(revision=100))); assertNull(db.sessions().get("id"))
         } finally { db.close() }
     }
+    @Test fun cleanupConsultsTheDatabaseBeforeTheUiProjectListHasLoaded():Unit=runBlocking {
+        val source=photo(); val id=UUID.randomUUID().toString()
+        try {
+            val recipe=EditorState(inputs=listOf(source.path)).recipe(Preferences()).toString()
+            app.database.projects().save(Project(id,"Queued job protection","enhance",recipe,status="queued"))
+            val vm=withContext(Dispatchers.Main) { StudioViewModel(app).also { it.clean() } }
+            withTimeout(15000) { vm.message.first { it.contains("Wait for processing") } }
+            assertTrue(source.isFile); assertFalse(vm.importing.value)
+        } finally { app.database.projects().delete(id); source.delete() }
+    }
     @Test fun versionOneDatabaseMigrationPreservesExistingSaves():Unit=runBlocking {
         val name="phase9-migration-${UUID.randomUUID()}.db"; val path=app.getDatabasePath(name).apply { parentFile!!.mkdirs() }
         var upgraded:StudioDatabase?=null

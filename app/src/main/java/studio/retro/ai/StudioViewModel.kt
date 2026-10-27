@@ -416,14 +416,15 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun clean() = launch {
         require(!importing.value) { "Wait for the current import or transfer to finish." }
-        require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
         importing.value=true; busyMessage.value="CLEANING STORAGE..."
         try {
+            val savedProjects=dao.observe().first()
+            require(savedProjects.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
             flushAutosave().join()
             val retained=(history.states()+editor.value).flatMap { it.inputs+(it.clips+it.captionSourceClips).map { clip -> clip.path } }.toSet()
             withContext(Dispatchers.IO) {
                 app.draftWriter.withRetainedMedia { sessions ->
-                    val used=projects.value.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained+sessions
+                    val used=savedProjects.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained+sessions
                     app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                     ProjectArchive.interruptedStaging(app.filesDir).forEach { it.deleteRecursively() }
                     File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
