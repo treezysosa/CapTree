@@ -103,11 +103,11 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val p=Project(UUID.randomUUID().toString(),"${e.tool.uppercase()} · ${java.text.SimpleDateFormat("MMM dd HH:mm",java.util.Locale.US).format(java.util.Date())}",e.tool,e.recipe(prefs.value).toString())
         if(draft) { dao.save(p); message.value="Saved in projects." } else enqueue(p)
     }
-    fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.get(project.id)?.let { dao.save(it.copy(status="cancelled")) } }
+    fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.status(project.id,"cancelled") }
     fun resume(project:Project) { editor.value=EditorState.restore(project.tool,project.recipe); screen.value="editor" }
     fun retry(project:Project) = launch { enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output="")) }
-    fun rename(project:Project,name:String) = launch { dao.save(project.copy(name=name.take(80).ifBlank { project.name })) }
-    fun favorite(project:Project) = launch { dao.save(project.copy(favorite=!project.favorite)) }
+    fun rename(project:Project,name:String) = launch { dao.rename(project.id,name.take(80).ifBlank { project.name }) }
+    fun favorite(project:Project) = launch { dao.favorite(project.id,!project.favorite) }
     fun duplicate(project:Project) = launch {
         val id=UUID.randomUUID().toString()
         val path=if(project.output.isNotBlank())withContext(Dispatchers.IO) { File(project.output).copyTo(File(app.filesDir,"outputs/$id.${File(project.output).extension}")).path } else ""

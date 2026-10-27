@@ -24,7 +24,8 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
         val mime=if(mp4)"video/mp4" else if(suffix=="gif")"image/gif" else if(jpeg)"image/jpeg" else "image/png"
         suspend fun progress(value:Int?,message:String) { setProgress(workDataOf("percent" to (value ?: -1),"message" to message)) }
         try {
-            dao.save(project.copy(status="processing",error="")); output.delete()
+            if(dao.status(id,"processing")==0)return@withContext Result.failure()
+            output.delete()
             progress(null,"LOADING CREATIVE POWER...")
             val inputs=recipe.optJSONArray("inputs")?.let { a -> List(a.length()) { File(a.getString(it)).canonicalFile.also { file -> require(file.path.startsWith(File(applicationContext.filesDir,"imports").canonicalPath+File.separator)) { "Invalid input location." } } } }.orEmpty()
             when(tool) {
@@ -63,16 +64,14 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                 else -> error("Unknown tool.")
             }
             require(output.isFile && output.length()>0) { "The processor produced no output." }
-            val latest=dao.get(id)
-            if(latest==null) { output.delete(); return@withContext Result.failure() }
-            dao.save(latest.copy(status="completed",recipe=recipe.toString(),output=output.path,mime=mime,error=""))
+            if(dao.complete(id,recipe.toString(),output.path,mime)==0) { output.delete(); return@withContext Result.failure() }
             Result.success(workDataOf("path" to output.path))
         } catch(e:CancellationException) {
-            output.delete(); withContext(NonCancellable) { dao.get(id)?.let { dao.save(it.copy(status="cancelled",error="Cancelled. Your imported files are kept for resuming.")) } }; throw e
+            output.delete(); withContext(NonCancellable) { dao.status(id,"cancelled","Cancelled. Your imported files are kept for resuming.") }; throw e
         } catch(e:Exception) {
-            output.delete(); dao.get(id)?.let { dao.save(it.copy(status="failed",error=e.message?.take(500) ?: "Processing failed.")) }; Result.failure()
+            output.delete(); dao.status(id,"failed",e.message?.take(500) ?: "Processing failed."); Result.failure()
         } catch(e:OutOfMemoryError) {
-            output.delete(); dao.get(id)?.let { dao.save(it.copy(status="failed",error="Not enough memory. Use smaller input media.")) }; Result.failure()
+            output.delete(); dao.status(id,"failed","Not enough memory. Use smaller input media."); Result.failure()
         }
     }
 }
