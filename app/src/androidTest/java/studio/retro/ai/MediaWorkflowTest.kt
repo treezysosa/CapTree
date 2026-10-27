@@ -46,8 +46,7 @@ class MediaWorkflowTest {
         val output = File(app.cacheDir, "${UUID.randomUUID()}.gif")
         try {
             GifEngine.create(listOf(red, blue), false, output, 0, 1000, 2, 1f, 160, true, "", "") {}
-            val movie = output.inputStream().use { Movie.decodeStream(it) }
-            assertNotNull(movie)
+            val movie = requireNotNull(output.inputStream().use { Movie.decodeStream(it) })
             assertEquals(1000, movie.duration())
             val canvasBitmap = Bitmap.createBitmap(96, 64, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(canvasBitmap)
@@ -85,6 +84,14 @@ class MediaWorkflowTest {
                 val video = formats.first { it.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
                 assertEquals(video.getInteger(MediaFormat.KEY_WIDTH), video.getInteger(MediaFormat.KEY_HEIGHT))
                 assertTrue(formats.any { it.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true })
+                val lastTimes=mutableListOf<Long>()
+                for(index in formats.indices) {
+                    extractor.selectTrack(index); extractor.seekTo(0,MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    var last=0L
+                    while(extractor.sampleTime>=0) { last=extractor.sampleTime; if(!extractor.advance())break }
+                    lastTimes+=last; extractor.unselectTrack(index)
+                }
+                assertTrue("Audio and video end times must stay within 200 ms",lastTimes.max()-lastTimes.min()<200000)
             } finally { extractor.release() }
         } finally { first.delete(); second.delete(); output.delete() }
     }

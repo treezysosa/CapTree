@@ -35,9 +35,10 @@ object VideoEngine {
                 override fun getText(presentationTimeUs:Long):android.text.SpannableString {
                     val time=presentationTimeUs/1000
                     val text=CaptionTrack.textAt(captions,time)
-                    return android.text.SpannableString(text).apply { setSpan(android.text.style.ForegroundColorSpan(android.graphics.Color.WHITE),0,length,0); setSpan(android.text.style.BackgroundColorSpan(android.graphics.Color.argb(170,21,24,39)),0,length,0); setSpan(android.text.style.AbsoluteSizeSpan(28,true),0,length,0) }
+                    // Media3 1.6 TextOverlay cannot allocate a zero-width bitmap.
+                    return android.text.SpannableString(text.ifBlank { " " }).apply { setSpan(android.text.style.ForegroundColorSpan(android.graphics.Color.WHITE),0,length,0); setSpan(android.text.style.BackgroundColorSpan(android.graphics.Color.argb(170,21,24,39)),0,length,0); setSpan(android.text.style.AbsoluteSizeSpan(28,true),0,length,0) }
                 }
-                override fun getOverlaySettings(presentationTimeUs:Long):OverlaySettings = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(0f,-0.82f).setOverlayFrameAnchor(0f,-1f).build()
+                override fun getOverlaySettings(presentationTimeUs:Long):OverlaySettings = StaticOverlaySettings.Builder().setAlphaScale(if(CaptionTrack.textAt(captions,presentationTimeUs/1000).isBlank())0f else 1f).setBackgroundFrameAnchor(0f,-0.82f).setOverlayFrameAnchor(0f,-1f).build()
             }
             effects+=OverlayEffect(listOf(overlay))
         }
