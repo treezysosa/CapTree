@@ -61,6 +61,7 @@ class PhaseFourMediaTest {
         } finally { input.delete(); mp4.delete() }
     }
 
+    @androidx.annotation.RequiresApi(28)
     @Test fun videoOverlaysEncodeAndTimedCaptionsDisappear():Unit=runBlocking {
         val image=photo(); val input=output("mp4"); val mp4=output("mp4")
         try {
@@ -71,8 +72,8 @@ class PhaseFourMediaTest {
             val reader=MediaMetadataRetriever()
             try {
                 reader.setDataSource(mp4.path)
-                fun pixels(timeUs:Long):Pair<Int,Int> {
-                    val bitmap=requireNotNull(reader.getFrameAtTime(timeUs,MediaMetadataRetriever.OPTION_CLOSEST))
+                fun pixels(index:Int):Pair<Int,Int> {
+                    val bitmap=requireNotNull(reader.getFrameAtIndex(index))
                     var top=0; var bottom=0
                     for(y in 0 until bitmap.height)for(x in 0 until bitmap.width) {
                         val c=bitmap.getPixel(x,y)
@@ -80,11 +81,28 @@ class PhaseFourMediaTest {
                     }
                     bitmap.recycle(); return top to bottom
                 }
-                val active=pixels(200000); val expired=pixels(700000)
-                assertTrue("Video sticker is visibly encoded",active.first>8 && expired.first>8)
-                assertTrue("Timed video caption is visibly encoded",active.second>15)
-                assertEquals("Expired caption leaves the lower frame clear",0,expired.second)
+                // Inspect actual encoded display frames, rather than relying on a device's
+                // time-seek implementation to return a non-keyframe near the requested time.
+                val extractor=MediaExtractor()
+                val times=ArrayList<Long>()
+                try {
+                    extractor.setDataSource(mp4.path)
+                    extractor.selectTrack((0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/")==true })
+                    while(extractor.sampleTime>=0) { times+=extractor.sampleTime; if(!extractor.advance())break }
+                } finally { extractor.release() }
+                val ordered=times.sorted(); assertTrue("Enough encoded video frames: $ordered",ordered.size>=7)
+                val samples=ordered.mapIndexed { index,time -> val (top,bottom)=pixels(index); Triple(time-ordered.first(),top,bottom) }
+                val active=samples.filter { it.first<300000 }; val expired=samples.filter { it.first>=600000 }
+                assertTrue("Both caption intervals have real frames: $samples",active.isNotEmpty() && expired.isNotEmpty())
+                assertTrue("Video sticker is visibly encoded: $samples",samples.all { it.second>8 })
+                assertTrue("Timed video caption is visibly encoded: $samples",active.all { it.third>15 })
+                assertTrue("Expired caption leaves the lower frame clear: $samples",expired.all { it.third==0 })
             } finally { reader.release() }
+        } catch(failure:Throwable) {
+            val diagnostics=File(app.getExternalFilesDir(null),"diagnostics").apply { mkdirs() }
+            if(input.isFile)input.copyTo(File(diagnostics,"overlay-input.mp4"),overwrite=true)
+            if(mp4.isFile)mp4.copyTo(File(diagnostics,"overlay-output.mp4"),overwrite=true)
+            throw failure
         } finally { image.delete(); input.delete(); mp4.delete() }
     }
 

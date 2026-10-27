@@ -9,6 +9,8 @@ for report in Path('app/build/outputs/androidTest-results').rglob('TEST*.xml'):
     print(report.read_text())
 PY
   adb logcat -d -s AndroidRuntime TestRunner | tail -n 160 || true
+  mkdir -p device-screenshots
+  adb pull /sdcard/Android/data/studio.retro.ai/files/diagnostics device-screenshots/ || true
 fi
 mkdir -p device-screenshots
 adb shell screencap -p /sdcard/retro-studio-verification.png || true
