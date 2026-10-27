@@ -28,7 +28,8 @@ data class EditorState(
     val seed:String="", val duration:Int=3, val motion:Float=0.5f, val captions:String="",
     val clips:List<ClipEdit> = emptyList(), val selectedClip:Int=0, val playheadMs:Long=0,
     val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null,
-    val transcriptionLanguage:String="auto"
+    val transcriptionLanguage:String="auto", val stabilize:Boolean=false,
+    val suggestedClips:List<SuggestedClip> = emptyList()
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -40,6 +41,7 @@ data class EditorState(
         put("clips",JSONArray().apply { clips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id) }) } })
         put("transcription_language",transcriptionLanguage)
         put("selected_clip",selectedClip)
+        put("stabilize",stabilize)
     }
     companion object {
         fun restore(tool:String,json:String):EditorState {
@@ -48,7 +50,7 @@ data class EditorState(
             val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),c.optString("id",UUID.randomUUID().toString())) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"))
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"))
         }
     }
 }
@@ -183,7 +185,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun selectClip(index:Int) {
         val e=editor.value; val clip=e.clips.getOrNull(index) ?: return
-        editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList())
+        editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList(),suggestedClips=emptyList())
     }
     fun moveClip(direction:Int) {
         val e=editor.value; if(e.clips.isEmpty())return
@@ -193,7 +195,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun removeClip() {
         val e=editor.value; if(e.clips.isEmpty())return
         val clips=e.clips.filterIndexed { i,_ -> i!=e.selectedClip }
-        editor.value=e.copy(clips=clips,inputs=clips.map { it.path }.distinct(),selectedClip=0,suggestions=emptyList())
+        editor.value=e.copy(clips=clips,inputs=clips.map { it.path }.distinct(),selectedClip=0,suggestions=emptyList(),suggestedClips=emptyList())
         if(clips.isNotEmpty())selectClip(0)
     }
     fun seek(ms:Long) {
@@ -224,6 +226,26 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val health=withContext(Dispatchers.IO) { BackendClient(origin,BackendSecrets(app).read()).health() }
         backendReport.value=health.put("_origin",origin)
         message.value=if(health.optInt("api_version",1)<2)"Connected to an older backend. Update it to v0.3 for readiness checks and automatic subtitles." else "Connected. Review each feature's model state below. Not loaded means inference has not yet been verified."
+    }
+    fun suggestClips() = launch {
+        require(!importing.value) { "Wait for current processing to finish." }
+        val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip)?.validated() ?: error("Import and select a clip first.")
+        require(clip.durationMs<=120000) { "Scan a selected range of two minutes or less." }
+        importing.value=true; busyMessage.value="SCANNING CLIP SIGNALS..."
+        try {
+            val source=File(clip.path)
+            val cuts=VideoEngine.scenes(source,clip.startMs,clip.endMs)
+            val quiet=runCatching { VideoEngine.silence(source,clip.startMs,clip.endMs) }
+            quiet.exceptionOrNull()?.let { if(it is CancellationException)throw it }
+            val offset=Timeline.outputOffset(e.clips,e.selectedClip)
+            val captions=CaptionTrack.parse(e.captions,e.clips.sumOf { it.durationMs }).filter { it.endMs>offset && it.startMs<offset+clip.durationMs }.map { it.copy(startMs=maxOf(0,it.startMs-offset)+clip.startMs,endMs=minOf(clip.durationMs,it.endMs-offset)+clip.startMs) }
+            val ranges=ClipSuggestions.rank(clip.startMs,clip.endMs,cuts,quiet.getOrDefault(emptyList()),captions,quiet.isSuccess)
+            val current=editor.value.clips.getOrNull(editor.value.selectedClip)
+            if(current?.id==clip.id && current.startMs==clip.startMs && current.endMs==clip.endMs)edit { it.copy(suggestedClips=ranges) }
+        } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
+    }
+    fun useSuggestion(suggestion:SuggestedClip) {
+        edit { it.copy(start="${suggestion.startMs/1000.0}",end="${suggestion.endMs/1000.0}",playheadMs=suggestion.startMs,previewRequestMs=suggestion.startMs,suggestedClips=emptyList()) }
     }
     fun testModel() = launch {
         require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for current processing to finish." }

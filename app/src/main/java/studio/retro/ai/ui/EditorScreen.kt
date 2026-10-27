@@ -57,7 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 PhotoAdjustments(vm,e)
             }
             "enhance" -> {
-                Text(if(e.video)"GPU brightness, contrast, saturation, edge-aware spatial denoising, and sharpening. These are traditional algorithms. Stabilization and face restoration require additional implementations." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
+                Text(if(e.video)"GPU brightness, contrast, saturation, spatial denoising, sharpening and optional translation stabilization. These are traditional algorithms. Face restoration needs an additional model." else "Histogram exposure and contrast, gray-world white balance, saturation, edge-aware denoising, and sharpening. These are traditional algorithms.",fontSize=12.sp)
                 PhotoAdjustments(vm,e)
             }
             "clipper" -> {
@@ -67,8 +67,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 Choice("CROP / RESIZE",listOf("Original","9:16","1:1","16:9"),e.aspect) { value -> vm.edit { it.copy(aspect=value) } }
                 RaisedButton("SPLIT AT PLAYHEAD",vm::split,enabled=e.clips.isNotEmpty())
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("SCENE CUTS",{ vm.analyze(false) },Modifier.weight(1f)); RaisedButton("QUIET AUDIO",{ vm.analyze(true) },Modifier.weight(1f)) }
+                RaisedButton("SUGGEST CLIP RANGES",vm::suggestClips,Modifier.fillMaxWidth(),enabled=e.clips.isNotEmpty())
+                for(suggestion in e.suggestedClips) {
+                    Text("${suggestion.startMs/1000.0}–${suggestion.endMs/1000.0}s · signal score ${suggestion.score}\n${suggestion.reason}",fontSize=12.sp,color=LocalConsole.current.accent)
+                    RaisedButton("USE THIS RANGE",{ vm.useSuggestion(suggestion) })
+                }
                 if(e.suggestions.isNotEmpty())LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.suggestions.size) { index -> TextButton({ vm.seek(e.suggestions[index]) }) { Text("${e.suggestions[index]/1000.0}s") } } }
-                Text("Suggestions measure scene changes and quiet audio; they do not classify semantic highlights.",fontSize=11.sp,color=LocalConsole.current.accent)
+                Text("Suggestions rank scene changes, quiet audio and caption activity within a selected range up to two minutes. Scores are conventional signals, not semantic AI judgments. Review captions after changing trim ranges.",fontSize=11.sp,color=LocalConsole.current.accent)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
                 Choice("SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
                 RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
@@ -80,14 +85,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 Choice("OUTPUT",listOf("GIF","MP4"),e.format) { value -> vm.edit { it.copy(format=value) } }
                 if(e.video)TimeFields(vm,e)
                 RetroSlider("FRAMES PER SECOND · ${e.fps}",e.fps.toFloat(),1f..24f,22) { value -> vm.edit { it.copy(fps=value.toInt()) } }
+                RetroSlider("SPEED · ${"%.2f".format(e.speed)}×",e.speed,0.25f..4f) { value -> vm.edit { it.copy(speed=value) } }
+                Choice("MAXIMUM EDGE · SIZE OPTIMIZATION",listOf("160","240","320","480"),"${e.width}") { value -> vm.edit { it.copy(width=value.toInt()) } }
+                RetroField("CAPTION",e.caption,{ value -> vm.edit { it.copy(caption=value) } })
+                Choice("STICKER",listOf("","★","♥","✦","☀"),e.sticker) { value -> vm.edit { it.copy(sticker=value) } }
                 if(e.format=="GIF") {
-                    RetroSlider("SPEED · ${e.speed}×",e.speed,0.25f..4f) { value -> vm.edit { it.copy(speed=value) } }
-                    Choice("MAXIMUM EDGE · SIZE OPTIMIZATION",listOf("160","240","320","480"),"${e.width}") { value -> vm.edit { it.copy(width=value.toInt()) } }
                     RetroToggle("Loop animation",e.loop) { value -> vm.edit { it.copy(loop=value) } }
-                    RetroField("CAPTION",e.caption,{ value -> vm.edit { it.copy(caption=value) } })
-                    Choice("STICKER",listOf("","★","♥","✦","☀"),e.sticker) { value -> vm.edit { it.copy(sticker=value) } }
-                    Text("Real animated GIF · RGB332 palette · up to 240 frames. Reduce dimensions or FPS for smaller files.",fontSize=11.sp)
-                } else Text("MP4 exports preserve the trim and audio of a video, or animate images at the chosen FPS. Caption, sticker, looping, and GIF speed controls apply to GIF output.",fontSize=11.sp)
+                    Text("Compressed animated GIF · RGB332 palette · up to 240 frames. GIF delays round to 10 ms with a 20 ms minimum. Reduce dimensions or FPS for smaller files.",fontSize=11.sp)
+                } else Text("MP4 applies captions, stickers, size and speed. Source audio changes speed with the video. Image animations support up to 60 effective FPS; video FPS is a cap without frame interpolation. Loop metadata is available for GIF output.",fontSize=11.sp)
                 RaisedButton("TEXT → AI ANIMATED GIF",{ vm.open("aigif") },color=LocalConsole.current.pink)
             }
             "photo","video","aigif" -> {
@@ -141,6 +146,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     RetroSlider("ENHANCEMENT INTENSITY · ${(e.intensity*100).toInt()}%",e.intensity,0f..1f) { value -> vm.edit { it.copy(intensity=value) } }
     RetroToggle(if(e.video)"Spatial video noise reduction" else "Noise reduction",e.denoise) { value -> vm.edit { it.copy(denoise=value) } }
     RetroToggle("Sharpening",e.sharpen) { value -> vm.edit { it.copy(sharpen=value) } }
+    if(e.video) {
+        RetroToggle("Translation stabilization",e.stabilize) { value -> vm.edit { it.copy(stabilize=value) } }
+        Text("For clips up to two minutes. Measures horizontal/vertical camera motion and crops borders. Best with textured, mostly stationary backgrounds; rotation and rolling shutter are not corrected.",fontSize=11.sp,color=LocalConsole.current.accent)
+    }
 }
 @Composable private fun TimeFields(vm:StudioViewModel,e:EditorState) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RetroField("START · sec",e.start,{ value -> vm.edit { it.copy(start=value) } },Modifier.weight(1f),number=true); RetroField("END · sec",e.end,{ value -> vm.edit { it.copy(end=value) } },Modifier.weight(1f),number=true) } }
 @Composable fun RetroField(label:String,value:String,onChange:(String)->Unit,modifier:Modifier=Modifier,multiline:Boolean=false,number:Boolean=false) { OutlinedTextField(value,onChange,modifier.fillMaxWidth(),label={ Text(label,fontSize=11.sp) },singleLine=!multiline,minLines=if(multiline)3 else 1,keyboardOptions=KeyboardOptions(keyboardType=if(number)KeyboardType.Decimal else KeyboardType.Text)) }

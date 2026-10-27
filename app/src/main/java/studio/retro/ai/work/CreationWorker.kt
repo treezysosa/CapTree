@@ -33,7 +33,10 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                     require(inputs.isNotEmpty()) { "Import media first." }
                     if(recipe.optBoolean("video")) {
                         val duration=VideoEngine.duration(inputs.first())
-                        VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),0,duration)),output,"Original",recipe.optDouble("intensity",0.7).toFloat(),emptyList(),recipe.optBoolean("denoise"),recipe.optBoolean("sharpen")) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
+                        val intensity=recipe.optDouble("intensity",0.7).toFloat()
+                        val profile=if(recipe.optBoolean("stabilize") && intensity>0)Stabilizer.analyze(inputs.first(),intensity) { progress(it,"MEASURING CAMERA MOTION...") } else null
+                        progress(null,"RENDERING VIDEO...")
+                        VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),0,duration)),output,"Original",intensity,emptyList(),recipe.optBoolean("denoise"),recipe.optBoolean("sharpen"),stabilization=profile) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else {
                         val source=PhotoEngine.read(inputs.first(),if(tool=="upscale")1024 else 2048)
                         try {
@@ -55,8 +58,9 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                 }
                 "gif" -> {
                     if(mp4) {
-                        if(recipe.optBoolean("video")) { val duration=VideoEngine.duration(inputs.first()); VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),recipe.optLong("start",0),recipe.optLong("end",duration))),output,"Original",0f,emptyList()) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) } }
-                        else VideoEngine.imagesToMp4(applicationContext,inputs,output,recipe.optInt("fps",8)) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
+                        val animation=AnimationOptions(recipe.optInt("fps",8),recipe.optDouble("speed",1.0).toFloat(),recipe.optInt("width",320),recipe.optString("caption"),recipe.optString("sticker"))
+                        if(recipe.optBoolean("video")) { val duration=VideoEngine.duration(inputs.first()); VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),recipe.optLong("start",0),recipe.optLong("end",duration))),output,"Original",0f,emptyList(),animation=animation) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) } }
+                        else VideoEngine.imagesToMp4(applicationContext,inputs,output,recipe.optInt("fps",8),animation=animation,preparing={value -> setProgressAsync(workDataOf("percent" to value,"message" to "PREPARING ANIMATION FRAMES...")) }) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else GifEngine.create(inputs,recipe.optBoolean("video"),output,recipe.optLong("start"),recipe.optLong("end",3000),recipe.optInt("fps",8),recipe.optDouble("speed",1.0).toFloat(),recipe.optInt("width",320),recipe.optBoolean("loop",true),recipe.optString("caption"),recipe.optString("sticker")) { progress(it,"ENCODING ANIMATION...") }
                 }
                 "transcribe" -> {

@@ -20,11 +20,10 @@ object GifEngine {
                     for(i in times.indices) {
                         currentCoroutineContext().ensureActive()
                         val frame=if(i==0)first else decode(i)
-                        val scaled=Bitmap.createScaledBitmap(frame,w,h,true)
-                        val decorated=PhotoEngine.decorate(scaled,caption,sticker)
+                        val decorated=MediaDecoration.fit(frame,w,h,caption,sticker)
                         val pixels=IntArray(w*h); decorated.getPixels(pixels,0,w,0,0,w,h)
                         encoder.frame(pixels,if(video)1000/fps else (1000f/fps/speed).toInt())
-                        if(decorated!==scaled)decorated.recycle(); if(scaled!==frame)scaled.recycle(); frame.recycle()
+                        decorated.recycle(); frame.recycle()
                         progress((i+1)*100/times.size)
                     }
                 }

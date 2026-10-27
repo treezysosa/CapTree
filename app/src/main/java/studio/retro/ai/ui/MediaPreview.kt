@@ -40,7 +40,8 @@ import java.io.File
         AndroidView(factory={ PlayerView(it).apply { this.player=player } },update={ it.player=player },modifier=modifier.fillMaxWidth().height(230.dp))
     } else if(mime=="image/gif") {
         var playing by remember(path) { mutableStateOf(true) }
-        Column { AndroidView(factory={ GifView(it,path) },update={ it.playing=playing; it.invalidate() },modifier=modifier.fillMaxWidth().height(230.dp)); Row { RaisedButton("PLAY",{ playing=true },color=LocalConsole.current.pink); Spacer(Modifier.width(10.dp)); RaisedButton("STOP",{ playing=false }) } }
+        var command by remember(path) { mutableIntStateOf(0) }
+        Column { AndroidView(factory={ GifView(it,path) },update={ it.control(command,playing) },modifier=modifier.fillMaxWidth().height(230.dp)); Row { RaisedButton("PLAY",{ playing=true; command++ },color=LocalConsole.current.pink); Spacer(Modifier.width(10.dp)); RaisedButton("STOP",{ playing=false; command++ }) } }
     } else {
         var zoom by remember(path) { mutableFloatStateOf(1f) }
         Column {
@@ -50,15 +51,20 @@ import java.io.File
     }
 }
 @Suppress("DEPRECATION")
-private class GifView(context:Context,path:String):View(context) {
+internal class GifView(context:Context,path:String):View(context) {
     private val movie=File(path).inputStream().use { Movie.decodeStream(it) }
+    private val loops=File(path).inputStream().use { stream -> val bytes=ByteArray(1024); val count=stream.read(bytes); count>0 && String(bytes,0,count,Charsets.ISO_8859_1).contains("NETSCAPE2.0") }
     private var position=0L; private var last=android.os.SystemClock.uptimeMillis()
-    var playing=true
-        set(value) { if(field!=value) { field=value; last=android.os.SystemClock.uptimeMillis() }; invalidate() }
+    private var playing=true; private var command=-1
+    fun control(sequence:Int,play:Boolean) {
+        if(sequence!=command) { command=sequence; playing=play; position=0; last=android.os.SystemClock.uptimeMillis(); invalidate() }
+    }
     override fun onDraw(canvas:Canvas) {
         super.onDraw(canvas); val m=movie ?: return
         val now=android.os.SystemClock.uptimeMillis(); if(playing)position+=now-last; last=now
-        val duration=m.duration().coerceAtLeast(100); m.setTime((position%duration).toInt())
+        val duration=m.duration().coerceAtLeast(100)
+        if(!loops && position>=duration) { position=duration-1L; playing=false }
+        m.setTime(if(loops)(position%duration).toInt() else position.toInt())
         val scale=minOf(width.toFloat()/m.width(),height.toFloat()/m.height()); canvas.save(); canvas.translate((width-m.width()*scale)/2,(height-m.height()*scale)/2); canvas.scale(scale,scale); m.draw(canvas,0f,0f); canvas.restore()
         if(playing)postInvalidateDelayed(33)
     }
