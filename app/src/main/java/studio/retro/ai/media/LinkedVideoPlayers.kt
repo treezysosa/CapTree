@@ -15,8 +15,8 @@ data class LinkedPlayback(val positionMs:Long=0,val durationMs:Long=0,val ready:
 /** Main-thread playback pair. Original audio is the sole audio source. */
 @androidx.annotation.OptIn(markerClass=[androidx.media3.common.util.UnstableApi::class])
 class LinkedVideoPlayers(context:Context,original:File,enhanced:File) {
-    private fun player()=ExoPlayer.Builder(context,DefaultRenderersFactory(context).setEnableDecoderFallback(true)).build()
-    val before=player(); val after=player()
+    private fun player(context:Context)=ExoPlayer.Builder(context,DefaultRenderersFactory(context).setEnableDecoderFallback(true)).build()
+    val before=player(context); val after=player(context)
     private var wanted=false; private var failure:String?=null; private var released=false
     init {
         val listener=object:Player.Listener {
