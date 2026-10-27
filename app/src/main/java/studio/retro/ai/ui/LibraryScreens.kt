@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
 @Composable fun ProjectsScreen(vm:StudioViewModel,gallery:Boolean) {
     val projects by vm.projects.collectAsStateWithLifecycle()
     val drafts by vm.automaticDrafts.collectAsStateWithLifecycle()
-    var filter by remember { mutableStateOf("All") }
+    var filter by remember(gallery) { mutableStateOf("All") }
     var opened by remember { mutableStateOf<String?>(null) }
     var rename by remember { mutableStateOf<Project?>(null) }
     var newName by remember { mutableStateOf("") }
