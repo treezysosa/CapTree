@@ -41,7 +41,7 @@ class MediaWorkflowTest {
         return file
     }
 
-    @Test fun gifContainsActuallyDifferentAnimatedFrames() = runBlocking {
+    @Test fun gifContainsActuallyDifferentAnimatedFrames(): Unit = runBlocking {
         val red = photo(Color.RED); val blue = photo(Color.BLUE)
         val output = File(app.cacheDir, "${UUID.randomUUID()}.gif")
         try {
@@ -58,7 +58,7 @@ class MediaWorkflowTest {
         } finally { red.delete(); blue.delete(); output.delete() }
     }
 
-    @Test fun photoCorrectionPreservesAnAlreadyWhiteImage() = runBlocking {
+    @Test fun photoCorrectionPreservesAnAlreadyWhiteImage(): Unit = runBlocking {
         val input = photo(Color.WHITE)
         try {
             val bitmap = PhotoEngine.read(input)
@@ -68,7 +68,7 @@ class MediaWorkflowTest {
         } finally { input.delete() }
     }
 
-    @Test fun videoTrimMergeAndCropPreserveAnAudioTrack() = runBlocking {
+    @Test fun videoTrimMergeAndCropPreserveAnAudioTrack(): Unit = runBlocking {
         val first = fixture("fixture.mp4"); val second = fixture("fixture-muted.mp4")
         val output = File(app.cacheDir, "${UUID.randomUUID()}.mp4")
         try {
@@ -96,7 +96,7 @@ class MediaWorkflowTest {
         } finally { first.delete(); second.delete(); output.delete() }
     }
 
-    @Test fun gpuDenoiseAndSharpenProduceDecodableVideo() = runBlocking {
+    @Test fun gpuDenoiseAndSharpenProduceDecodableVideo(): Unit = runBlocking {
         val input = fixture("fixture.mp4"); val output = File(app.cacheDir, "${UUID.randomUUID()}.mp4")
         try {
             withTimeout(90000) { VideoEngine.export(app, listOf(Segment(input, 0, 1000)), output, "Original", 0.7f, emptyList(), true, true) {} }
@@ -111,7 +111,7 @@ class MediaWorkflowTest {
         } finally { input.delete(); output.delete() }
     }
 
-    @Test fun importedPhotoRunsThroughTheActualBackgroundGifWorkflow() = runBlocking {
+    @Test fun importedPhotoRunsThroughTheActualBackgroundGifWorkflow(): Unit = runBlocking {
         val input = photo(Color.GREEN, File(app.filesDir, "outputs"))
         val vm = StudioViewModel(app)
         var projectId: String? = null

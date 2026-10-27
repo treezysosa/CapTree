@@ -45,7 +45,7 @@ No production route returns placeholder media. Missing packages/models, unsuppor
 
 ```sh
 pip install faster-whisper==1.1.1
-python backend/transcribe.py movie.mp4 --model small > captions.txt
+python backend/transcribe.py movie.mp4 --model small > captions.srt
 ```
 
-Paste the generated `milliseconds|caption` lines into AI Clipper's caption editor. Times are relative to exported time zero; adjust when trimming away the start of a source.
+Use AI Clipper → Import SRT to load the generated file. `--format legacy` outputs the original `milliseconds|caption` events for pasting. Times are relative to exported time zero; adjust them when trimming or reordering source clips.
