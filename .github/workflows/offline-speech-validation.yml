@@ -1,0 +1,39 @@
+name: Validate offline speech model
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/offline-speech-validation.yml'
+      - 'tools/validate_offline_speech.py'
+      - 'app/src/main/java/studio/retro/ai/media/OfflineSpeech.kt'
+      - 'app/src/main/java/studio/retro/ai/media/SpeechModelStore.kt'
+      - 'app/src/main/java/studio/retro/ai/media/SpeechPcm.kt'
+      - 'app/src/androidTest/java/studio/retro/ai/PretrainedSpeechTest.kt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: offline-speech-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: sudo apt-get update -qq && sudo apt-get install -y espeak-ng ffmpeg
+      - run: pip install vosk==0.3.45
+      - run: python tools/validate_offline_speech.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-offline-speech-fixtures
+          path: |
+            model-validation/offline-speech/speech-model.zip
+            model-validation/offline-speech/speech.wav
+            model-validation/offline-speech/speech.mp4
+            model-validation/offline-speech/report.json
+          retention-days: 14
