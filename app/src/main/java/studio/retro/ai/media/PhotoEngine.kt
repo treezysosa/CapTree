@@ -26,7 +26,7 @@ object PhotoEngine {
         val histogram = IntArray(256); val sums = DoubleArray(3)
         src.forEach { c -> val r=c ushr 16 and 255; val g=c ushr 8 and 255; val b=c and 255; histogram[(r*54+g*183+b*19) shr 8]++; sums[0]+=r; sums[1]+=g; sums[2]+=b }
         fun percentile(fraction: Float): Int { var n=0; for(i in histogram.indices) { n+=histogram[i]; if(n>=src.size*fraction)return i }; return 255 }
-        val low=percentile(0.015f); val high=percentile(0.985f); val range=(high-low).coerceAtLeast(32)
+        val low=percentile(0.015f); val high=percentile(0.985f)
         val gray=sums.average(); val balance=sums.map { (gray/it.coerceAtLeast(1.0)).coerceIn(0.8,1.2) }
         val out=IntArray(src.size)
         val colors=IntArray(3)
@@ -43,7 +43,7 @@ object PhotoEngine {
                         v=if(denoise) v*0.35f+blur*0.65f else v
                         if(sharpen) v+=(v-blur)*0.7f
                     }
-                    val corrected=((v*balance[k]-low)*255/range).toFloat().coerceIn(0f,255f)
+                    val corrected=EditRules.autoContrast((v*balance[k]).toFloat(),low,high)
                     colors[k]=(original+(corrected-original)*amount).roundToInt().coerceIn(0,255)
                 }
                 val lum=(colors[0]+colors[1]+colors[2])/3f

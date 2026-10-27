@@ -1,6 +1,10 @@
 package studio.retro.ai.media
 
 object EditRules {
+    fun autoContrast(value:Float,low:Int,high:Int):Float {
+        val span=high-low
+        return if(span<32)value.coerceIn(0f,255f) else ((value-low)*255/span).coerceIn(0f,255f)
+    }
     fun frameTimes(startMs: Long, endMs: Long, fps: Int, speed: Float): List<Long> {
         require(startMs >= 0 && endMs > startMs) { "Choose an end after the start." }
         require(fps in 1..24 && speed in 0.25f..4f)

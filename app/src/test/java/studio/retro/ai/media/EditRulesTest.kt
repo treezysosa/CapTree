@@ -5,6 +5,12 @@ import org.junit.Test
 import java.io.ByteArrayOutputStream
 
 class EditRulesTest {
+    @Test fun autoContrastPreservesFlatPhotosAndStretchesUsefulRanges() {
+        for(value in listOf(0f,128f,255f))assertEquals(value,EditRules.autoContrast(value,value.toInt(),value.toInt()),0.001f)
+        assertEquals(0f,EditRules.autoContrast(32f,32,224),0.001f)
+        assertEquals(255f,EditRules.autoContrast(224f,32,224),0.001f)
+        assertEquals(127.5f,EditRules.autoContrast(128f,32,224),0.001f)
+    }
     @Test fun frameTimesRespectSpeedAndTrim() {
         assertEquals(listOf(1000L,1250L,1500L,1750L),EditRules.frameTimes(1000,2000,8,2f))
     }
