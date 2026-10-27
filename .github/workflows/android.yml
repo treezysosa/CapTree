@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: retro-studio-${{ github.workflow }}-${{ github.ref }}
+  group: retro-studio-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 jobs:
   android:
