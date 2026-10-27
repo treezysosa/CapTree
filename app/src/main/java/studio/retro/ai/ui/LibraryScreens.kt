@@ -79,13 +79,13 @@ import kotlinx.coroutines.withContext
     var comparison by remember(p.id) { mutableStateOf("After") }
     val source=remember(p.recipe) { runCatching { JSONObject(p.recipe).optJSONArray("inputs")?.optString(0) }.getOrNull() }
     if(p.tool in setOf("enhance","upscale") && !source.isNullOrBlank()) {
-        Choice("COMPARISON",if(p.mime.startsWith("video/"))listOf("Before","After") else listOf("Before","After","Wipe"),comparison) { comparison=it }
+        Choice("COMPARISON",if(p.mime.startsWith("video/"))listOf("Before","After","Linked") else listOf("Before","After","Wipe"),comparison) { comparison=it }
     }
     if(p.mime=="application/x-subrip") {
         val captions by produceState("Loading subtitles…",p.output) { value=withContext(Dispatchers.IO) { File(p.output).readText().take(12000) } }
         Text(captions,fontSize=12.sp,maxLines=20)
         RaisedButton("REOPEN TIMELINE WITH SUBTITLES",{ vm.applyTranscript(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
-    } else if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
+    } else if(comparison=="Linked" && source!=null)VideoComparison(source,p.output) else if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.mime!="application/x-subrip" && android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())

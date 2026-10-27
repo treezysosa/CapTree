@@ -10,6 +10,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import studio.retro.ai.media.ClipEdit
+import studio.retro.ai.media.CaptionCue
+import studio.retro.ai.media.CaptionTrack
+import studio.retro.ai.data.Project
+import org.json.JSONObject
+import org.json.JSONArray
+import kotlinx.coroutines.runBlocking
+import java.util.UUID
 import java.io.File
 import org.junit.Assert.*
 
@@ -20,6 +27,52 @@ class StudioSmokeTest {
         compose.onNodeWithText("AUTO\nENHANCE").performScrollTo().performClick()
         compose.onNodeWithText("IMPORT PHOTOS").assertExists()
         compose.onNodeWithText("START PROCESSING").performScrollTo().assertExists()
+    }
+    @Test fun timelineButtonsRetimeCaptionsAndUndoRedoRestoreTheWholeEdit() {
+        lateinit var vm:StudioViewModel
+        val first=ClipEdit("/local/first.mp4",0,1000,1000)
+        val second=ClipEdit("/local/second.mp4",0,1000,1000)
+        val captions=CaptionTrack.srt(listOf(CaptionCue(100,600,"FIRST"),CaptionCue(1100,1600,"SECOND")))
+        compose.runOnIdle {
+            vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; vm.open("clipper")
+            vm.editor.value=vm.editor.value.copy(clips=listOf(first,second),selectedClip=1,start="0",end="1",captions=captions)
+        }
+        compose.onNodeWithText("UNDO").assertIsNotEnabled()
+        compose.onNodeWithText("← MOVE").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("SECOND",CaptionTrack.textAt(CaptionTrack.parse(vm.editor.value.captions,2000),200)) }
+        compose.onNodeWithText("UNDO").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(first.id,vm.editor.value.clips.first().id); assertEquals(captions,vm.editor.value.captions) }
+        compose.onNodeWithText("REDO").performClick()
+        compose.runOnIdle { assertEquals(second.id,vm.editor.value.clips.first().id) }
+        compose.onNodeWithText("REMOVE").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf(first),vm.editor.value.clips); assertEquals(listOf(CaptionCue(100,600,"FIRST")),CaptionTrack.parse(vm.editor.value.captions,1000)) }
+        compose.onNodeWithText("UNDO").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(2,vm.editor.value.clips.size); vm.back() }
+    }
+    @Test fun resultComparisonControlsPlayPauseAndCloseLinkedPreviews() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext()
+        val id=UUID.randomUUID().toString(); val before=File(app.cacheDir,"compare-before-$id.mp4"); val after=File(app.cacheDir,"compare-after-$id.mp4")
+        for((name,file) in listOf("fixture.mp4" to before,"fixture-muted.mp4" to after))InstrumentationRegistry.getInstrumentation().context.assets.open(name).use { source -> file.outputStream().use { source.copyTo(it) } }
+        val recipe=JSONObject().put("inputs",JSONArray(listOf(before.path))).put("video",true).toString()
+        val project=Project(id,"Linked UI test","enhance",recipe,status="completed",output=after.path,mime="video/mp4")
+        lateinit var vm:StudioViewModel; var cleanup:StudioViewModel?=null
+        try {
+            runBlocking { app.database.projects().save(project) }
+            compose.runOnIdle { vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; cleanup=vm; vm.active.value=id; vm.screen.value="processing" }
+            compose.waitUntil(10000) { vm.projects.value.any { it.id==id } }
+            compose.onNodeWithText("Linked").performScrollTo().performClick()
+            compose.onNodeWithText("LINKED PREVIEW").assertExists()
+            compose.onNodeWithText("PLAY BOTH").performScrollTo()
+            compose.waitUntil(20000) { runCatching { compose.onNodeWithText("PLAY BOTH").assertIsEnabled() }.isSuccess }
+            compose.onNodeWithText("PLAY BOTH").performClick()
+            compose.onNodeWithText("PAUSE BOTH").performClick()
+            compose.onNodeWithText("PLAY BOTH").assertExists()
+            compose.onNodeWithText("After").performScrollTo().performClick()
+            compose.onNodeWithText("LINKED PREVIEW").assertDoesNotExist()
+        } finally {
+            compose.runOnIdle { cleanup?.back() }
+            runBlocking { app.database.projects().delete(id) }; before.delete(); after.delete()
+        }
     }
     @Test fun automaticSubtitlesAskBeforeSendingSelectedAudio() {
         val app:StudioApplication=ApplicationProvider.getApplicationContext()

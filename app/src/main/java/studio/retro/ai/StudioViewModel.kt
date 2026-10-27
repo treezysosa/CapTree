@@ -31,7 +31,8 @@ data class EditorState(
     val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null,
     val transcriptionLanguage:String="auto", val stabilize:Boolean=false,
     val suggestedClips:List<SuggestedClip> = emptyList(),
-    val gifPalette:String="Adaptive 256", val gifDither:Boolean=false
+    val gifPalette:String="Adaptive 256", val gifDither:Boolean=false,
+    val captionSourceClips:List<ClipEdit> = emptyList(), val captionSourceCues:List<CaptionCue> = emptyList()
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -45,15 +46,21 @@ data class EditorState(
         put("selected_clip",selectedClip)
         put("stabilize",stabilize)
         put("gif_palette",gifPalette); put("gif_dither",gifDither)
+        put("caption_source_clips",JSONArray().apply { captionSourceClips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id); put("origin",clip.originId) }) } })
+        put("caption_source_cues",JSONArray().apply { captionSourceCues.forEach { cue -> put(JSONObject().apply { put("start",cue.startMs); put("end",cue.endMs); put("text",cue.text) }) } })
     }
     companion object {
         fun restore(tool:String,json:String):EditorState {
             val r=JSONObject(json); val a=r.optJSONArray("inputs") ?: JSONArray()
             val timeline=r.optJSONArray("clips")
-            val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); val id=c.optString("id").ifBlank { UUID.randomUUID().toString() }; ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),id,c.optString("origin",id).ifBlank { id }) }
+            fun readClips(array:JSONArray?):List<ClipEdit> = if(array==null)emptyList() else List(array.length()) { index -> val c=array.getJSONObject(index); val id=c.optString("id").ifBlank { UUID.randomUUID().toString() }; ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),id,c.optString("origin",id).ifBlank { id }) }
+            val clips=readClips(timeline)
+            val sourceClips=readClips(r.optJSONArray("caption_source_clips"))
+            val sourceArray=r.optJSONArray("caption_source_cues")
+            val sourceCues=if(sourceArray==null)emptyList() else List(sourceArray.length()) { i -> val cue=sourceArray.getJSONObject(i); CaptionCue(cue.getLong("start"),cue.getLong("end"),cue.getString("text")) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"))
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues)
         }
     }
 }
@@ -88,13 +95,15 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun edit(group:String?=null,change:(EditorState)->EditorState) {
         try {
             val old=editor.value; var next=change(old)
+            if(next.captions!=old.captions)next=next.copy(captionSourceClips=emptyList(),captionSourceCues=emptyList())
             if(next.tool=="clipper" && next.clips==old.clips && next.selectedClip==old.selectedClip && (next.start!=old.start || next.end!=old.end)) {
                 trim(next)?.let { edited -> next=next.copy(clips=next.clips.mapIndexed { i,c -> if(i==next.selectedClip)edited else c }) }
             }
             if(next.tool=="clipper" && next.clips!=old.clips) {
-                if(old.captions.isNotBlank() && next.captions==old.captions && next.clips.take(old.clips.size)!=old.clips) {
-                    val cues=CaptionTrack.parse(old.captions,old.clips.sumOf { it.durationMs }.coerceAtLeast(1))
-                    next=next.copy(captions=CaptionTrack.srt(CaptionTimeline.retime(cues,old.clips,next.clips)))
+                if((old.captions.isNotBlank() || old.captionSourceCues.isNotEmpty()) && next.captions==old.captions && old.clips.isNotEmpty()) {
+                    val source=old.captionSourceClips.ifEmpty { old.clips }
+                    val cues=if(old.captionSourceClips.isNotEmpty())old.captionSourceCues else CaptionTrack.parse(old.captions,old.clips.sumOf { it.durationMs }.coerceAtLeast(1))
+                    next=next.copy(captions=CaptionTrack.srt(CaptionTimeline.retime(cues,source,next.clips)),captionSourceClips=source,captionSourceCues=cues)
                 }
                 next=next.copy(suggestions=emptyList(),suggestedClips=emptyList())
             }
@@ -246,10 +255,10 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun clean() = launch {
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
-        val retained=(history.states()+editor.value).flatMap { it.inputs+it.clips.map { clip -> clip.path } }.toSet()
+        val retained=(history.states()+editor.value).flatMap { it.inputs+(it.clips+it.captionSourceClips).map { clip -> clip.path } }.toSet()
         withContext(Dispatchers.IO) {
             app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            val used=projects.value.flatMap { p -> runCatching { val a=JSONObject(p.recipe).optJSONArray("inputs"); if(a==null)emptyList() else List(a.length()){a.getString(it)} }.getOrDefault(emptyList()) }.toSet()+retained
+            val used=projects.value.flatMap { p -> runCatching { val r=JSONObject(p.recipe); val a=r.optJSONArray("inputs"); val source=r.optJSONArray("caption_source_clips"); (if(a==null)emptyList() else List(a.length()){a.getString(it)})+(if(source==null)emptyList() else List(source.length()){source.getJSONObject(it).getString("path")}) }.getOrDefault(emptyList()) }.toSet()+retained
             File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
         }; message.value="Cache and unused imports cleared."
     }
@@ -305,7 +314,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val duration=state.clips.sumOf { it.durationMs }; val offset=recipe.optLong("caption_offset",0)
         val replacement=withContext(Dispatchers.IO) { CaptionTrack.parse(File(project.output).readText(),duration) }
         val combined=CaptionTrack.replaceRange(CaptionTrack.parse(state.captions,duration),replacement,offset,offset+clip.durationMs)
-        clearHistory(); editor.value=state.copy(captions=CaptionTrack.srt(combined)); screen.value="editor"
+        clearHistory(); editor.value=state.copy(captions=CaptionTrack.srt(combined),captionSourceClips=emptyList(),captionSourceCues=emptyList()); screen.value="editor"
         message.value="Subtitles applied to the saved timeline snapshot. Review text and timing before exporting."
     }
 }

@@ -86,7 +86,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
                 Text("Optional speech recognition runs on your self-hosted server. Only the selected clip's trimmed audio is sent, after confirmation. Other editing stays offline.",fontSize=11.sp)
                 RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit("caption-text") { it.copy(captions=value) } },multiline=true)
-                Text("Captions follow source footage through trims, splits, moves and removals. Trimmed portions are removed; UNDO recovers the previous edit. Finish valid caption syntax before editing the timeline. Review subtitle text at cuts.",fontSize=11.sp)
+                Text("Captions follow source footage through trims, splits, moves and removals. Shorter trims hide text; expanding the trim restores it. Edited captions use the current trim as their starting point. UNDO recovers earlier edits. Finish valid caption syntax before changing the timeline.",fontSize=11.sp)
             }
             "gif" -> {
                 Choice("OUTPUT",listOf("GIF","MP4"),e.format) { value -> vm.edit { it.copy(format=value) } }
@@ -106,14 +106,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
             }
             "photo","video","aigif" -> {
                 Text("Prompts and any imported image are sent only when you start generation and have enabled remote processing. Requires your own compatible inference server and model hardware.",fontSize=12.sp,color=LocalConsole.current.accent)
-                RetroField("PROMPT >",e.prompt,{ value -> vm.edit { it.copy(prompt=value) } },multiline=true)
-                if(e.tool=="photo")RetroField("NEGATIVE PROMPT >",e.negative,{ value -> vm.edit { it.copy(negative=value) } },multiline=true)
+                RetroField("PROMPT >",e.prompt,{ value -> vm.edit("ai-prompt") { it.copy(prompt=value) } },multiline=true)
+                if(e.tool=="photo")RetroField("NEGATIVE PROMPT >",e.negative,{ value -> vm.edit("ai-negative") { it.copy(negative=value) } },multiline=true)
                 Choice("STYLE",if(e.tool=="photo")PhotoStyles else VideoStyles,e.style) { value -> vm.edit { it.copy(style=value) } }
                 Choice("ASPECT RATIO",listOf("1:1","9:16","16:9"),e.aspect) { value -> vm.edit { it.copy(aspect=value) } }
-                RetroField("SEED · blank = random",e.seed,{ value -> vm.edit { it.copy(seed=value) } },number=true)
+                RetroField("SEED · blank = random",e.seed,{ value -> vm.edit("ai-seed") { it.copy(seed=value) } },number=true)
                 if(e.tool!="photo") {
                     Choice("DURATION · SECONDS",listOf("2","3","6"),"${e.duration}") { value -> vm.edit { it.copy(duration=value.toInt()) } }
-                    RetroSlider("MOTION PROMPT STRENGTH",e.motion,0f..1f) { value -> vm.edit { it.copy(motion=value) } }
+                    RetroSlider("MOTION PROMPT STRENGTH",e.motion,0f..1f) { value -> vm.edit("ai-motion") { it.copy(motion=value) } }
                     Text("CogVideoX renders a fixed six-second source at its native resolution. The server trims/resizes it to your selection. Motion changes the model prompt; it is not optical-flow control.",fontSize=11.sp)
                 }
                 RaisedButton("BACKEND SETTINGS",{ vm.screen.value="settings" })
