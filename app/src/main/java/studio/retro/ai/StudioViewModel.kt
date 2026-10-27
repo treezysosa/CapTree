@@ -88,7 +88,11 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             val durations=if(video)withContext(Dispatchers.IO) { files.map { VideoEngine.duration(it) } } else emptyList()
             val duration=durations.firstOrNull()?.div(1000.0) ?: 3.0
             val clips=if(video && editor.value.tool=="clipper")files.mapIndexed { i,f -> ClipEdit(f.path,0,durations[i],durations[i]) } else emptyList()
-            editor.value=editor.value.copy(inputs=files.map(File::getPath),video=video,start="0",end="${minOf(duration,if(editor.value.tool=="gif")5.0 else duration)}",clips=clips,selectedClip=0,playheadMs=0,suggestions=emptyList())
+            val existing=editor.value
+            editor.value=if(existing.tool=="clipper" && existing.clips.isNotEmpty()) {
+                require(existing.clips.size+clips.size<=40) { "A timeline supports at most 40 blocks." }
+                existing.copy(inputs=(existing.inputs+files.map(File::getPath)).distinct(),clips=existing.clips+clips)
+            } else existing.copy(inputs=files.map(File::getPath),video=video,start="0",end="${minOf(duration,if(existing.tool=="gif")5.0 else duration)}",clips=clips,selectedClip=0,playheadMs=0,suggestions=emptyList())
             message.value="${files.size} media file(s) imported into private storage."
         } finally { importing.value=false }
     }

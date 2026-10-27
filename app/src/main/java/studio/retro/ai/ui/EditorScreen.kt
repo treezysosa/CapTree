@@ -30,7 +30,7 @@ import java.io.File
         if(!isAI || e.tool in setOf("photo","video")) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(e.tool!="clipper")RaisedButton(if(isAI)"INPUT IMAGE" else "IMPORT PHOTOS",{ imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },Modifier.weight(1f))
-                if(!isAI && e.tool in setOf("gif","clipper","enhance"))RaisedButton("IMPORT VIDEO",{ videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },Modifier.weight(1f))
+                if(!isAI && e.tool in setOf("gif","clipper","enhance"))RaisedButton(if(e.tool=="clipper" && e.clips.isNotEmpty())"ADD VIDEOS" else "IMPORT VIDEO",{ videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },Modifier.weight(1f))
             }
         }
         if(e.inputs.isNotEmpty()) {

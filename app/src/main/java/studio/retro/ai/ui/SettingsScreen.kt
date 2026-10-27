@@ -47,7 +47,7 @@ import java.io.File
         Text("Imports and projects live in app-private storage. Exports are created only on your command. Android Photo Picker grants access only to selected files. Uninstalling removes private projects.",fontSize=12.sp)
         RaisedButton("CLEAR CACHE & UNUSED IMPORTS",vm::clean)
         RaisedButton("REMOVE AI MODEL",{ vm.launch { require(vm.projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish." }; File(context.filesDir,"models/realesrgan-x4.onnx").delete(); modelInstalled=false; vm.message.value="Model removed." } })
-        PixelText("ABOUT · v0.1.0",size=9,color=LocalConsole.current.accent)
+        PixelText("ABOUT · v${studio.retro.ai.BuildConfig.VERSION_NAME}",size=9,color=LocalConsole.current.accent)
         Text("RETRO AI STUDIO\nAn original handheld-inspired creation studio. Android 8+ · Kotlin / Compose.\nPress Start 2P © its authors, SIL Open Font License 1.1. Media3 / AndroidX: Apache 2.0. ONNX Runtime: MIT.\nModel licenses are separate; see THIRD_PARTY_NOTICES.md. Not affiliated with Nintendo.",fontSize=12.sp)
         RaisedButton("OPEN SAVE GAMES",{ vm.screen.value="projects" })
     }
