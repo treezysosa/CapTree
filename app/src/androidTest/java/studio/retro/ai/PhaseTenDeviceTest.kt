@@ -27,6 +27,11 @@ class PhaseTenDeviceTest {
         // This checks the bundled native loader, not inference with an absent model.
         assertTrue(ai.onnxruntime.OrtEnvironment.getEnvironment().version.isNotBlank())
     }
+    @Test fun speechNativeRuntimeLoadsWithUncompressedApkPackaging() {
+        // Actually invokes Vosk through JNA; no model or speech-inference claim here.
+        org.vosk.LibVosk.vosk_set_log_level(-1)
+        org.vosk.LibVosk.vosk_set_log_level(0)
+    }
     @Test fun latePreviewPositionsCannotOverrideASeekOrAnotherSelectedBlock():Unit=runBlocking {
         val app=ApplicationProvider.getApplicationContext<StudioApplication>()
         withContext(Dispatchers.Main) {
