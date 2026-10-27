@@ -54,6 +54,9 @@ Use AI Clipper → Import SRT to load the generated file. `--format legacy` outp
 
 ## Automatic subtitles from Android
 
+Android v0.8 also offers [offline English subtitles](OFFLINE_SPEECH.md) using an imported Vosk model. That option needs no backend. The instructions below apply to the separate server option.
+
+
 Set `RETRO_WHISPER_MODEL=tiny` (default, fast CPU) or a compatible faster-whisper model/local path. `pip install -r backend/requirements.txt` includes the speech dependencies; for a CPU speech-only server, install `backend/requirements-test.txt` plus `backend/requirements-speech.txt`. No CUDA GPU is needed for speech. The first job downloads model weights unless a local path/cache is used.
 
 In AI Clipper, select and trim a block, choose the speech language, and press **AI Auto Subtitles · Server**. Confirm **Send Audio**. The app decodes the selected audio range locally, uploads only its PCM WAV to `POST /v1/transcriptions`, and polls the authenticated job API. The result is a real SRT file. Open the completed save and choose **Reopen Timeline With Subtitles** to replace captions in the selected output range while preserving captions elsewhere. It uses the saved timeline snapshot; review timing after later edits.

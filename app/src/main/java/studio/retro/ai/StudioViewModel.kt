@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import studio.retro.ai.data.*
@@ -89,6 +90,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     private var transferJob:Job?=null
     private var transferCommitted=false
     val modelReport=MutableStateFlow("")
+    val speechInstalled=MutableStateFlow(SpeechModelStore.installed(File(app.filesDir,"models")))
     val backendReport=MutableStateFlow<JSONObject?>(null)
     val active=MutableStateFlow<String?>(null)
     val work=WorkManager.getInstance(app)
@@ -169,6 +171,25 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
                 File(dir,"validation.txt").writeText(report.description()); modelReport.value=report.description()
             } finally { tmp.delete() }
         }; message.value="Model installed after successful on-device x4 inference validation." } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
+    }
+    fun speechModel(uri:Uri) = launch {
+        require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for current processing before installing a speech model." }
+        importing.value=true; busyMessage.value="VERIFYING SPEECH MODEL..."; busyPercent.value=null
+        try {
+            withContext(Dispatchers.IO) {
+                OfflineSpeech.gate.withLock {
+                    OfflineSpeech.ensureMemory(app)
+                    val task=currentCoroutineContext()
+                    app.contentResolver.openInputStream(uri)!!.use { source -> SpeechModelStore.install(source,File(app.filesDir,"models"),OfflineSpeech::probe,{ task.ensureActive() }) { value,label -> busyPercent.value=value; busyMessage.value=label } }
+                }
+            }
+            message.value="English speech model installed after actual device inference. Offline subtitles are ready."
+        } finally { speechInstalled.value=SpeechModelStore.installed(File(app.filesDir,"models")); importing.value=false; busyPercent.value=null; busyMessage.value="READING YOUR MEDIA..." }
+    }
+    fun removeSpeechModel() = launch {
+        require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing before removing the speech model." }
+        withContext(Dispatchers.IO) { OfflineSpeech.gate.withLock { require(SpeechModelStore.directory(File(app.filesDir,"models")).deleteRecursively()) { "Cannot remove the speech model." } } }
+        speechInstalled.value=false; message.value="Offline speech model removed. Saved subtitles are kept."
     }
     private suspend fun enqueue(project:Project) {
         val request=OneTimeWorkRequestBuilder<CreationWorker>().setInputData(workDataOf("project" to project.id)).addTag("creation").build()
@@ -397,13 +418,17 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             modelReport.value=description; message.value="On-device x4 inference test passed. This verifies compatibility, not the provenance of user-supplied weights."
         } finally { importing.value=false; busyMessage.value="READING YOUR MEDIA..." }
     }
-    fun transcribe() = launch {
+    fun transcribe(offline:Boolean=false) = launch {
         require(!importing.value) { "Wait for current processing to finish." }
         val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip)?.validated() ?: error("Select a video clip first.")
-        require(clip.durationMs<=600000) { "Trim the selected clip to ten minutes or less." }
-        require(prefs.value.remoteConsent && prefs.value.backend.isNotBlank()) { "Configure a backend and allow remote processing in Settings first." }
+        require(trim(e)==clip) { "Finish valid start/end times before requesting subtitles." }
+        require(clip.durationMs<=if(offline)120000 else 600000) { if(offline)"Offline subtitles support up to two minutes per selected block." else "Trim the selected clip to ten minutes or less." }
+        if(offline)require(SpeechModelStore.installed(File(app.filesDir,"models"))) { "Import the verified English speech model in Settings first." }
+        else require(prefs.value.remoteConsent && prefs.value.backend.isNotBlank()) { "Configure a backend and allow remote processing in Settings first." }
         val recipe=e.recipe(prefs.value).put("transcribe_index",e.selectedClip).put("caption_offset",Timeline.outputOffset(e.clips,e.selectedClip))
-        enqueue(Project(UUID.randomUUID().toString(),"AUTO SUBTITLES · CLIP ${e.selectedClip+1}","transcribe",recipe.toString()))
+            .put("speech_engine",if(offline)"offline" else "server")
+        if(offline) { recipe.put("backend","").put("consent",false).put("transcription_language","en") }
+        enqueue(Project(UUID.randomUUID().toString(),"${if(offline)"OFFLINE" else "AUTO"} SUBTITLES · CLIP ${e.selectedClip+1}","transcribe",recipe.toString()))
     }
     fun applyTranscript(project:Project) = launch {
         require(project.status=="completed" && project.mime=="application/x-subrip")

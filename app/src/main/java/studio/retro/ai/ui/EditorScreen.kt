@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     var confirmTranscription by remember { mutableStateOf(false) }
     val confirmFace by vm.faceConfirmation.collectAsStateWithLifecycle()
     val confirmHighlights by vm.highlightConfirmation.collectAsStateWithLifecycle()
+    val speechInstalled by vm.speechInstalled.collectAsStateWithLifecycle()
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
@@ -97,7 +98,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                     }
                 }
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
-                Choice("SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
+                PixelText("AUTOMATIC SUBTITLES",size=9,color=LocalConsole.current.lcd)
+                RaisedButton("OFFLINE ENGLISH SUBTITLES",{ vm.transcribe(offline=true) },Modifier.fillMaxWidth(),enabled=e.clips.isNotEmpty() && speechInstalled)
+                Text(if(speechInstalled)"English model installed. Recognizes the selected block on this phone, up to two minutes. No audio upload or server connection. Review all generated captions." else "Import the optional English speech model in Settings to use automatic subtitles without a server.",fontSize=11.sp)
+                RaisedButton("SPEECH MODEL SETTINGS",{ vm.screen.value="settings" })
+                Choice("SERVER SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
                 RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
                 Text("Optional speech recognition runs on your self-hosted server. Only the selected clip's trimmed audio is sent, after confirmation. Other editing stays offline.",fontSize=11.sp)
                 RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit("caption-text") { it.copy(captions=value) } },multiline=true)

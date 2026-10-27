@@ -105,23 +105,37 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                     } finally { frames.deleteRecursively() }
                 }
                 "transcribe" -> {
-                    val prefs=app.settings.flow.first()
-                    require(prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Allow remote processing for this backend in Settings first." }
-                    val client=BackendClient(prefs.backend,BackendSecrets(applicationContext).read())
-                    client.requireCapability("transcription")
+                    val engine=recipe.optString("speech_engine","server")
+                    require(engine in setOf("offline","server")) { "Unknown speech engine. Reopen the timeline and choose a subtitle method." }
+                    val local=engine=="offline"
+                    val client=if(local) {
+                        require(SpeechModelStore.installed(File(applicationContext.filesDir,"models"))) { "Import the verified English speech model in Settings first." }
+                        null
+                    } else {
+                        val prefs=app.settings.flow.first()
+                        require(prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Allow remote processing for this backend in Settings first." }
+                        BackendClient(prefs.backend,BackendSecrets(applicationContext).read()).also { it.requireCapability("transcription") }
+                    }
                     val clips=recipe.getJSONArray("clips"); val selected=clips.getJSONObject(recipe.optInt("transcribe_index",0))
                     val source=File(selected.getString("path")).canonicalFile
                     require(source in inputs) { "Invalid selected audio source." }
                     val start=selected.getLong("start"); val end=selected.getLong("end")
+                    if(local)require(end-start<=120000) { "Offline subtitles support up to two minutes per selected block." }
                     val audio=File(applicationContext.cacheDir,"selected-audio-$id.wav")
+                    val mono=File(applicationContext.cacheDir,"offline-speech-$id.wav")
                     try {
                         AudioEngine.extractWav(source,start,end,audio) { progress(it,"PREPARING SELECTED AUDIO...") }
-                        client.transcribe(audio,recipe.optString("transcription_language","auto"),output) { percent,message -> progress(percent,message) }
+                        if(local) {
+                            val task=currentCoroutineContext()
+                            SpeechPcm.convert(audio,mono,{ task.ensureActive() }) { setProgressAsync(workDataOf("percent" to it,"message" to "PREPARING MONO SPEECH AUDIO...")) }
+                            OfflineSpeech.transcribe(applicationContext,SpeechModelStore.directory(File(applicationContext.filesDir,"models")),mono,output) { value,message -> progress(value,message) }
+                            recipe.put("speech_model",SpeechModelStore.MODEL_ID).put("speech_model_sha256",SpeechModelStore.SHA256)
+                        } else client!!.transcribe(audio,recipe.optString("transcription_language","auto"),output) { percent,message -> progress(percent,message) }
                         val offset=recipe.optLong("caption_offset",0)
                         val cues=CaptionTrack.parse(output.readText(),end-start).filter { it.startMs<end-start }.map { it.copy(startMs=it.startMs+offset,endMs=minOf(it.endMs,end-start)+offset) }
                         require(cues.isNotEmpty()) { "No subtitle cues were returned." }
                         output.writeText(CaptionTrack.srt(cues))
-                    } finally { audio.delete() }
+                    } finally { audio.delete(); mono.delete() }
                 }
                 "photo","video","aigif" -> {
                     val prefs=app.settings.flow.first()

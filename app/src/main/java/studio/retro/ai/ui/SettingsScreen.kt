@@ -17,6 +17,8 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import studio.retro.ai.data.BackendClient
+import studio.retro.ai.media.SpeechModelStore
+import androidx.compose.ui.platform.LocalUriHandler
 
 @Composable fun SettingsScreen(vm:StudioViewModel) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -32,6 +34,9 @@ import studio.retro.ai.data.BackendClient
         vm.modelReport.value=withContext(Dispatchers.IO) { File(context.filesDir,"models/validation.txt").takeIf { it.exists() }?.readText().orEmpty() }
     } }
     val model=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.model(uri) }
+    val speechModel=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.speechModel(uri) }
+    val speechInstalled by vm.speechInstalled.collectAsStateWithLifecycle()
+    val uriHandler=LocalUriHandler.current
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText("CONSOLE SETTINGS",color=LocalConsole.current.lcd)
         Choice("SHELL THEME",listOf("Classic Purple","Glacier Blue","Retro Green"),prefs.theme) { value -> vm.launch { vm.settings.theme(value) } }
@@ -44,6 +49,13 @@ import studio.retro.ai.data.BackendClient
         RaisedButton("RUN ON-DEVICE MODEL TEST",vm::testModel,enabled=modelInstalled && !importing)
         if(modelInstalled && modelReport.isNotBlank())Text(modelReport,fontSize=10.sp,color=LocalConsole.current.accent)
         Text("Model weights are not bundled. See docs/MODELS.md for export commands, tensor format, attribution, and memory limits. Optional GFPGAN face restoration uses separately configured models on your CPU server.",fontSize=12.sp)
+        PixelText("OFFLINE SPEECH CARTRIDGE",size=9,color=LocalConsole.current.accent)
+        Text(if(speechInstalled)"English speech model installed and verified." else "No offline speech model. Optional English subtitles run on your phone after model import.",fontSize=12.sp)
+        Text("Vosk small English · Apache 2.0 · 40 MB download. Keep 256 MB storage free for installation and at least 384 MB system memory available for inference. Supports up to two minutes per selected block; captions need review. Other languages remain available through server subtitles.",fontSize=12.sp)
+        RaisedButton("GET ENGLISH SPEECH MODEL",{ uriHandler.openUri(SpeechModelStore.MODEL_URL) },enabled=!importing)
+        RaisedButton("IMPORT ENGLISH MODEL ZIP",{ speechModel.launch(arrayOf("application/zip","application/octet-stream","*/*")) },enabled=!importing)
+        RaisedButton("REMOVE SPEECH MODEL",vm::removeSpeechModel,enabled=speechInstalled && !importing)
+        Text("Download opens in your browser. Import checks the exact official archive and tests the real recognizer before installation. The app never downloads speech weights automatically. Native speech decoding runs locally and needs no microphone permission.",fontSize=12.sp)
         PixelText("OPTIONAL AI SERVER",size=9,color=LocalConsole.current.accent)
         RetroField("HTTPS BACKEND URL",url,{ url=it })
         OutlinedTextField(token,{ token=it },Modifier.fillMaxWidth(),label={ Text("Replace server token (blank keeps current)") },singleLine=true,visualTransformation=PasswordVisualTransformation())

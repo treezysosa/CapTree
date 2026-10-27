@@ -21,7 +21,7 @@ class ProjectArchiveTest {
         val output=File(root,"outputs/output.png").apply { parentFile.mkdirs(); writeBytes(byteArrayOf(5,6,7,8)) }
         val clip=JSONObject().put("path",input.path).put("start",0).put("end",1000).put("duration",2000).put("id","clip").put("origin","clip")
         val recipe=JSONObject().put("tool","clipper").put("inputs",JSONArray().put(input.path)).put("clips",JSONArray().put(clip)).put("caption_source_clips",JSONArray().put(clip)).put("captions","0|Retro")
-            .put("backend","PRIVATE_BACKEND").put("consent",true).put("token","PRIVATE_TOKEN").put("face_restore",true).put("gif_palette","Adaptive 64")
+            .put("backend","PRIVATE_BACKEND").put("consent",true).put("token","PRIVATE_TOKEN").put("face_restore",true).put("gif_palette","Adaptive 64").put("speech_engine","offline").put("speech_model","vosk-model-small-en-us-0.15")
         return Project("old","My save","clipper",recipe.toString(),status="completed",output=output.path,mime="image/png",favorite=true)
     }
     private fun entries(bytes:ByteArray):LinkedHashMap<String,ByteArray> {
@@ -46,6 +46,7 @@ class ProjectArchiveTest {
             assertEquals(input,recipe.getJSONArray("caption_source_clips").getJSONObject(0).getString("path"))
             assertEquals("",recipe.getString("backend")); assertFalse(recipe.getBoolean("consent")); assertFalse(recipe.getBoolean("face_restore"))
             assertEquals("Adaptive 64",recipe.getString("gif_palette"))
+            assertEquals("offline",recipe.getString("speech_engine")); assertEquals("vosk-model-small-en-us-0.15",recipe.getString("speech_model"))
         } finally { original.deleteRecursively(); target.deleteRecursively() }
     }
     @Test fun unexpectedPathsAndTamperedAssetsLeaveNoImportedFiles():Unit=runBlocking {

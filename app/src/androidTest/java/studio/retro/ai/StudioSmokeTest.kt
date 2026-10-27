@@ -24,6 +24,19 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class StudioSmokeTest {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
+    @Test fun offlineSubtitlesShowModelReadinessAndOpenTheSpeechSettings() {
+        lateinit var vm:StudioViewModel
+        compose.runOnIdle {
+            vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; vm.open("clipper")
+            vm.editor.value=vm.editor.value.copy(clips=listOf(ClipEdit("/local/clip.mp4",0,2000,2000)),start="0",end="2")
+            vm.speechInstalled.value=false
+        }
+        compose.onNodeWithText("OFFLINE ENGLISH SUBTITLES").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("SPEECH MODEL SETTINGS").performScrollTo().performClick()
+        compose.onNodeWithText("OFFLINE SPEECH CARTRIDGE").performScrollTo().assertExists()
+        compose.onNodeWithText("IMPORT ENGLISH MODEL ZIP").assertExists()
+        compose.runOnIdle { vm.back() }
+    }
     @Test fun visualHighlightsRequireExplicitFrameConsentAndCancellationStartsNoJob() {
         val app:StudioApplication=ApplicationProvider.getApplicationContext(); val previous=runBlocking { app.settings.flow.first() }
         val file=File(app.cacheDir,"ui-highlight-consent-${UUID.randomUUID()}.mp4")

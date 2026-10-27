@@ -10,6 +10,7 @@ import zipfile
 
 MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
 MODEL_FOLDER = "vosk-model-small-en-us-0.15"
+MODEL_SHA256 = "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"
 
 
 def prepare(output):
@@ -24,6 +25,7 @@ def prepare(output):
                 raise ValueError("Unexpected model archive size.")
             digest.update(chunk)
             sink.write(chunk)
+    assert digest.hexdigest() == MODEL_SHA256, "Official archive checksum changed; review it before use."
     with zipfile.ZipFile(archive) as zipped:
         names = zipped.namelist()
         assert len(names) < 100

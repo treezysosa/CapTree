@@ -22,3 +22,5 @@ face-models/
 *.retro.zip
 clip-model/
 .venv-highlights/
+app/src/androidTest/assets/speech-validation/
+offline-speech-device/
