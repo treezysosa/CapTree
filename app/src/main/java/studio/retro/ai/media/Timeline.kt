@@ -7,7 +7,8 @@ data class ClipEdit(
     val startMs: Long,
     val endMs: Long,
     val sourceDurationMs: Long,
-    val id: String = UUID.randomUUID().toString()
+    val id: String = UUID.randomUUID().toString(),
+    val originId: String = id
 ) {
     val durationMs: Long get() = endMs - startMs
     fun validated(): ClipEdit {
