@@ -17,3 +17,5 @@ These workflows stay on the device and require no model download, account or ser
 `./gradlew testDebugUnitTest lintDebug assembleDebug` checks compression with an independent GIF decoder, dictionary resets, known translations, smoothing around scene cuts, candidate ranking and the existing media rules.
 
 `./gradlew connectedDebugAndroidTest` additionally decodes real Android outputs. Phase 4 tests check a styled image MP4, video overlay appearance/expiry, speed-adjusted audio/video end times, reduced translation jitter, one-shot GIF restart, and the UI action that scans and applies a clip range. Original synthetic fixtures avoid external footage or personal media. CI runs these on API 29 and API 35 with software GPU rendering; this does not establish physical-device codec compatibility.
+
+The timed-overlay test checks indexed display frames against encoded presentation timestamps, avoiding device-specific time-seek behavior. Failed overlay checks retain their synthetic input/output MP4s in the device-verification artifact for inspection. Emulator jobs compile their own APKs and run independently of the JVM/lint build.
