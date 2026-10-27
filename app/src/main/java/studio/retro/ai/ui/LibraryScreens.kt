@@ -96,7 +96,7 @@ import kotlinx.coroutines.withContext
     } else if(p.mime=="application/x-subrip") {
         val captions by produceState("Loading subtitles…",p.output) { value=withContext(Dispatchers.IO) { File(p.output).readText().take(12000) } }
         Text(captions,fontSize=12.sp,maxLines=20)
-        if(runCatching { JSONObject(p.recipe).optString("speech_engine")=="offline" }.getOrDefault(false))Text("Vosk English · recognized on this phone · no audio upload",fontSize=11.sp,color=LocalConsole.current.accent)
+        if(runCatching { JSONObject(p.recipe).optString("speech_engine")=="offline" }.getOrDefault(false))Text("Vosk English · offline transcription",fontSize=11.sp,color=LocalConsole.current.accent)
         RaisedButton("REOPEN TIMELINE WITH SUBTITLES",{ vm.applyTranscript(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
     } else if(comparison=="Linked" && source!=null)VideoComparison(source,p.output) else if(comparison=="Wipe" && source!=null)PhotoComparison(source,p.output) else MediaPreview(if(comparison=="Before" && source!=null)source else p.output,p.mime)
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
