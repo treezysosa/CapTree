@@ -15,6 +15,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,7 +90,7 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
     val c=LocalConsole.current
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { PixelText("CHOOSE YOUR POWER",color=c.lcd,size=8); Text("06",color=c.accent,fontSize=12.sp) }
-        LazyVerticalGrid(GridCells.Fixed(2),Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+        LazyVerticalGrid(GridCells.Fixed(2),Modifier.weight(1f).testTag("feature-cartridges"),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
             items(6) { i ->
                 val accent=listOf(c.accent,c.pink,c.lcd,Color(0xFFE9BD70),c.lcd,c.pink)[i]
                 Column(Modifier.fillMaxWidth().heightIn(min=124.dp).border(if(selected==i)3.dp else 1.dp,if(selected==i)accent else accent.copy(alpha=0.25f),RoundedCornerShape(6.dp)).background(Navy,RoundedCornerShape(6.dp)).clickable { onOpen(i) }.padding(12.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {

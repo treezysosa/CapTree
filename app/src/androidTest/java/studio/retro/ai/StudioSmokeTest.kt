@@ -89,7 +89,8 @@ class StudioSmokeTest {
         } finally { compose.runOnIdle { cleanup?.back() }; photo.delete(); runBlocking { app.settings.backend(previous.backend); app.settings.consent(previous.remoteConsent) } }
     }
     @Test fun homeCartridgeOpensRealOfflineEditor() {
-        compose.onNodeWithText("AUTO\nENHANCE").performScrollTo().performClick()
+        compose.onNodeWithTag("feature-cartridges").performScrollToIndex(4)
+        compose.onNodeWithText("AUTO\nENHANCE").performClick()
         compose.onNodeWithText("IMPORT PHOTOS").assertExists()
         compose.onNodeWithText("START PROCESSING").performScrollTo().assertExists()
     }
