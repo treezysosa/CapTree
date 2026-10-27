@@ -46,6 +46,9 @@ class StudioSmokeTest {
             val selectedId=vm.editor.value.clips[1].id
             compose.onNodeWithText("← MOVE").performScrollTo().assertIsEnabled().performClick()
             compose.runOnIdle { assertEquals(selectedId,vm.editor.value.clips[0].id); assertEquals(0,vm.editor.value.selectedClip) }
+            compose.runOnIdle { vm.active.value=null; vm.screen.value="processing" }
+            compose.onNodeWithText("B").performClick()
+            compose.onNodeWithText("CHOOSE YOUR POWER").assertExists()
         } finally { compose.runOnIdle { cleanup?.back() }; file.delete() }
     }
 }

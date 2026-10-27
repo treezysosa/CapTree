@@ -68,7 +68,11 @@ val VideoStyles=listOf("Cinematic","Anime","Retro VHS","Pixel Art","Cartoon","Fa
             ConsoleControls(
                 onMove={ delta -> feedback(); if(route=="home")selected=(selected+delta+6)%6 else if(route=="editor" && editor.tool=="clipper") { if(kotlin.math.abs(delta)==1)vm.seek(editor.playheadMs+delta*33L) else vm.selectClip((editor.selectedClip+if(delta>0)1 else -1).coerceIn(0,(editor.clips.size-1).coerceAtLeast(0))) } },
                 onA={ feedback(); when(route) { "home"->vm.open(ToolIds[selected]); "editor"->vm.create(); "processing"->vm.screen.value="projects"; else->vm.back() } },
-                onB={ feedback(); if(route=="processing")projects.firstOrNull { it.id==vm.active.value && it.status in setOf("queued","processing") }?.let(vm::cancel) else vm.back() },
+                onB={
+                    feedback()
+                    val running=if(route=="processing")projects.firstOrNull { it.id==vm.active.value && it.status in setOf("queued","processing") } else null
+                    if(running!=null)vm.cancel(running) else vm.back()
+                },
                 onStart={ feedback(); vm.screen.value="home" },
                 onSelect={ feedback(); vm.screen.value="projects" }
             )
