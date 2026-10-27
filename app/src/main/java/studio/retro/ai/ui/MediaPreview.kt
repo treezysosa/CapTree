@@ -1,4 +1,3 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
 package studio.retro.ai.ui
 
 import android.content.Context
@@ -23,6 +22,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import java.io.File
 
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 @Composable fun MediaPreview(path:String,mime:String,modifier:Modifier=Modifier) {
     val context=LocalContext.current
     if(mime.startsWith("video")) {

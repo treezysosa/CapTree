@@ -1,4 +1,3 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
 package studio.retro.ai.media
 
 import android.content.Context
@@ -16,6 +15,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.math.*
 
 data class Segment(val file: File, val start: Long, val end: Long)
+@androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 object VideoEngine {
     fun duration(file:File):Long {
         val reader=MediaMetadataRetriever()
