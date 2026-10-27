@@ -1,6 +1,8 @@
 package studio.retro.ai
 
 import android.content.pm.PackageManager
+import android.content.ContentValues
+import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -65,6 +67,13 @@ class PretrainedSpeechTest {
             File(transcript.output).copyTo(File(diagnostics,"speech-on-device.srt"),overwrite=true)
             File(exported.output).copyTo(File(diagnostics,"speech-caption-export.mp4"),overwrite=true)
             File(diagnostics,"speech-on-device.json").writeText(JSONObject().put("engine","Vosk Android 0.3.75").put("model",SpeechModelStore.MODEL_ID).put("sha256",SpeechModelStore.SHA256).put("android_api",android.os.Build.VERSION.SDK_INT).put("remote_consent",false).put("transcript",text).put("cue_count",cues.size).put("timeline_offset_ms",500).put("export_duration_ms",VideoEngine.duration(File(exported.output))).toString(2))
+            // Gradle may uninstall test apps before the shell collector runs. Keep synthetic
+            // validation outputs in scoped Downloads so the evidence survives that cleanup.
+            for(file in diagnostics.listFiles().orEmpty()) {
+                val values=ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME,file.name); put(MediaStore.MediaColumns.RELATIVE_PATH,"Download/RetroAiValidation"); put(MediaStore.MediaColumns.MIME_TYPE,when(file.extension) { "mp4"->"video/mp4"; "srt"->"application/x-subrip"; else->"application/json" }) }
+                val uri=requireNotNull(app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values))
+                app.contentResolver.openOutputStream(uri)!!.use { sink -> file.inputStream().use { it.copyTo(sink) } }
+            }
             // A real recognizer on silence must fail instead of manufacturing subtitles.
             silence.outputStream().use { it.write(WavPcm16.header(16000,1,32000)); it.write(ByteArray(32000)) }
             try { OfflineSpeech.transcribe(app,SpeechModelStore.directory(models),silence,none) { _,_-> }; fail("Silence cannot produce fake subtitles") } catch(expected:IllegalArgumentException) { assertTrue(expected.message!!.contains("No English speech")); assertFalse(none.exists()) }
