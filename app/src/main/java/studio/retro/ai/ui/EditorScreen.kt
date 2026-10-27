@@ -26,12 +26,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     val subtitlePicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { if(it!=null)vm.importCaptions(it) }
     val subtitleExport=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-subrip")) { if(it!=null)vm.exportCaptions(it) }
     val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val canUndo by vm.canUndo.collectAsStateWithLifecycle()
+    val canRedo by vm.canRedo.collectAsStateWithLifecycle()
+    val importing by vm.importing.collectAsStateWithLifecycle()
     var confirmTranscription by remember { mutableStateOf(false) }
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText(title,color=LocalConsole.current.lcd,size=10)
         Text(if(isAI)"REMOTE AI · your self-hosted server" else if(e.tool=="upscale")"LOCAL AI · imported Real-ESRGAN ONNX model" else "OFFLINE · conventional media processing",color=LocalConsole.current.accent,fontSize=11.sp)
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            RaisedButton("UNDO",vm::undo,Modifier.weight(1f),enabled=canUndo && !importing)
+            RaisedButton("REDO",vm::redo,Modifier.weight(1f),enabled=canRedo && !importing)
+        }
         if(!isAI || e.tool in setOf("photo","video")) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 if(e.tool!="clipper")RaisedButton(if(isAI)"INPUT IMAGE" else "IMPORT PHOTOS",{ imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },Modifier.weight(1f))
@@ -47,7 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
             Text("${e.inputs.size} file(s) · ${if(e.video)"video" else "images"}",color=Cream,fontSize=12.sp)
             if(e.tool!="clipper")LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.inputs.size) { i -> Text("▣ ${i+1}",Modifier.background(LocalConsole.current.shell).padding(10.dp),color=Cream) } }
             if(e.inputs.size>1 && e.tool !in setOf("clipper","gif"))Text("This tool processes the first file.",color=LocalConsole.current.accent,fontSize=11.sp)
-            TextButton({ vm.edit { it.copy(inputs=emptyList(),video=false,clips=emptyList(),selectedClip=0,suggestions=emptyList()) } }) { Text("CLEAR INPUTS") }
+            TextButton({ vm.edit { it.copy(inputs=emptyList(),video=false,clips=emptyList(),captions="",selectedClip=0,suggestions=emptyList(),suggestedClips=emptyList()) } }) { Text("CLEAR INPUTS") }
         }
         when(e.tool) {
             "upscale" -> {
@@ -73,25 +80,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                     RaisedButton("USE THIS RANGE",{ vm.useSuggestion(suggestion) })
                 }
                 if(e.suggestions.isNotEmpty())LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.suggestions.size) { index -> TextButton({ vm.seek(e.suggestions[index]) }) { Text("${e.suggestions[index]/1000.0}s") } } }
-                Text("Suggestions rank scene changes, quiet audio and caption activity within a selected range up to two minutes. Scores are conventional signals, not semantic AI judgments. Review captions after changing trim ranges.",fontSize=11.sp,color=LocalConsole.current.accent)
+                Text("Suggestions rank scene changes, quiet audio and caption activity within a selected range up to two minutes. Scores are conventional signals, not semantic AI judgments. Captions follow the footage when a range is applied.",fontSize=11.sp,color=LocalConsole.current.accent)
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
                 Choice("SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
                 RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
                 Text("Optional speech recognition runs on your self-hosted server. Only the selected clip's trimmed audio is sent, after confirmation. Other editing stays offline.",fontSize=11.sp)
-                RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit { it.copy(captions=value) } },multiline=true)
-                Text("Caption times refer to the exported timeline. Reordering/trimming clips does not retime captions automatically. Export validates subtitle syntax. The optional faster-whisper CLI can generate SRT input from speech.",fontSize=11.sp)
+                RetroField("EDIT CAPTIONS · SRT or milliseconds|text",e.captions,{ value -> vm.edit("caption-text") { it.copy(captions=value) } },multiline=true)
+                Text("Captions follow source footage through trims, splits, moves and removals. Trimmed portions are removed; UNDO recovers the previous edit. Finish valid caption syntax before editing the timeline. Review subtitle text at cuts.",fontSize=11.sp)
             }
             "gif" -> {
                 Choice("OUTPUT",listOf("GIF","MP4"),e.format) { value -> vm.edit { it.copy(format=value) } }
                 if(e.video)TimeFields(vm,e)
-                RetroSlider("FRAMES PER SECOND · ${e.fps}",e.fps.toFloat(),1f..24f,22) { value -> vm.edit { it.copy(fps=value.toInt()) } }
-                RetroSlider("SPEED · ${"%.2f".format(e.speed)}×",e.speed,0.25f..4f) { value -> vm.edit { it.copy(speed=value) } }
+                RetroSlider("FRAMES PER SECOND · ${e.fps}",e.fps.toFloat(),1f..24f,22) { value -> vm.edit("gif-fps") { it.copy(fps=value.toInt()) } }
+                RetroSlider("SPEED · ${"%.2f".format(e.speed)}×",e.speed,0.25f..4f) { value -> vm.edit("gif-speed") { it.copy(speed=value) } }
                 Choice("MAXIMUM EDGE · SIZE OPTIMIZATION",listOf("160","240","320","480"),"${e.width}") { value -> vm.edit { it.copy(width=value.toInt()) } }
-                RetroField("CAPTION",e.caption,{ value -> vm.edit { it.copy(caption=value) } })
+                RetroField("CAPTION",e.caption,{ value -> vm.edit("gif-caption") { it.copy(caption=value) } })
                 Choice("STICKER",listOf("","★","♥","✦","☀"),e.sticker) { value -> vm.edit { it.copy(sticker=value) } }
                 if(e.format=="GIF") {
                     RetroToggle("Loop animation",e.loop) { value -> vm.edit { it.copy(loop=value) } }
-                    Text("Compressed animated GIF · RGB332 palette · up to 240 frames. GIF delays round to 10 ms with a 20 ms minimum. Reduce dimensions or FPS for smaller files.",fontSize=11.sp)
+                    Choice("COLOR PALETTE",listOf("Classic 256","Adaptive 64","Adaptive 128","Adaptive 256"),e.gifPalette) { value -> vm.edit { it.copy(gifPalette=value) } }
+                    if(e.gifPalette!="Classic 256")RetroToggle("Dither gradients",e.gifDither) { value -> vm.edit { it.copy(gifDither=value) } }
+                    Text("Adaptive colors preserve subtle tones; dithering softens bands and may increase file size. Classic uses a fixed retro palette. Up to 240 frames; GIF delays round to 10 ms with a 20 ms minimum. Reduce dimensions or FPS for smaller files.",fontSize=11.sp)
                 } else Text("MP4 applies captions, stickers, size and speed. Source audio changes speed with the video. Image animations support up to 60 effective FPS; video FPS is a cap without frame interpolation. Loop metadata is available for GIF output.",fontSize=11.sp)
                 RaisedButton("TEXT → AI ANIMATED GIF",{ vm.open("aigif") },color=LocalConsole.current.pink)
             }
@@ -143,7 +152,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     }
 }
 @Composable private fun PhotoAdjustments(vm:StudioViewModel,e:EditorState) {
-    RetroSlider("ENHANCEMENT INTENSITY · ${(e.intensity*100).toInt()}%",e.intensity,0f..1f) { value -> vm.edit { it.copy(intensity=value) } }
+    RetroSlider("ENHANCEMENT INTENSITY · ${(e.intensity*100).toInt()}%",e.intensity,0f..1f) { value -> vm.edit("enhance-intensity") { it.copy(intensity=value) } }
     RetroToggle(if(e.video)"Spatial video noise reduction" else "Noise reduction",e.denoise) { value -> vm.edit { it.copy(denoise=value) } }
     RetroToggle("Sharpening",e.sharpen) { value -> vm.edit { it.copy(sharpen=value) } }
     if(e.video) {
@@ -151,7 +160,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
         Text("For clips up to two minutes. Measures horizontal/vertical camera motion and crops borders. Best with textured, mostly stationary backgrounds; rotation and rolling shutter are not corrected.",fontSize=11.sp,color=LocalConsole.current.accent)
     }
 }
-@Composable private fun TimeFields(vm:StudioViewModel,e:EditorState) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RetroField("START · sec",e.start,{ value -> vm.edit { it.copy(start=value) } },Modifier.weight(1f),number=true); RetroField("END · sec",e.end,{ value -> vm.edit { it.copy(end=value) } },Modifier.weight(1f),number=true) } }
+@Composable private fun TimeFields(vm:StudioViewModel,e:EditorState) { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RetroField("START · sec",e.start,{ value -> vm.edit("trim-start") { it.copy(start=value) } },Modifier.weight(1f),number=true); RetroField("END · sec",e.end,{ value -> vm.edit("trim-end") { it.copy(end=value) } },Modifier.weight(1f),number=true) } }
 @Composable fun RetroField(label:String,value:String,onChange:(String)->Unit,modifier:Modifier=Modifier,multiline:Boolean=false,number:Boolean=false) { OutlinedTextField(value,onChange,modifier.fillMaxWidth(),label={ Text(label,fontSize=11.sp) },singleLine=!multiline,minLines=if(multiline)3 else 1,keyboardOptions=KeyboardOptions(keyboardType=if(number)KeyboardType.Decimal else KeyboardType.Text)) }
 @Composable fun Choice(label:String,choices:List<String>,selected:String,onSelect:(String)->Unit) {
     Column { Text(label,color=LocalConsole.current.accent,fontSize=11.sp); LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(choices.size) { i -> FilterChip(selected==choices[i],{ onSelect(choices[i]) },label={ Text(choices[i].ifBlank { "None" },fontSize=12.sp) }) } } }

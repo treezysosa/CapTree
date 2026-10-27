@@ -18,6 +18,7 @@ import studio.retro.ai.media.*
 import studio.retro.ai.work.CreationWorker
 import java.io.File
 import java.util.UUID
+import kotlin.math.roundToLong
 
 data class EditorState(
     val tool:String="enhance", val inputs:List<String> = emptyList(), val video:Boolean=false,
@@ -29,7 +30,8 @@ data class EditorState(
     val clips:List<ClipEdit> = emptyList(), val selectedClip:Int=0, val playheadMs:Long=0,
     val suggestions:List<Long> = emptyList(), val previewRequestMs:Long?=null,
     val transcriptionLanguage:String="auto", val stabilize:Boolean=false,
-    val suggestedClips:List<SuggestedClip> = emptyList()
+    val suggestedClips:List<SuggestedClip> = emptyList(),
+    val gifPalette:String="Adaptive 256", val gifDither:Boolean=false
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -38,19 +40,20 @@ data class EditorState(
         put("scale",scale); put("intensity",intensity.toDouble()); put("denoise",denoise); put("sharpen",sharpen)
         put("prompt",prompt); put("negative",negative); put("style",style); put("aspect",aspect); put("seed",seed.toLongOrNull() ?: -1L); put("duration",duration); put("motion",motion.toDouble()); put("captions",captions)
         put("backend",prefs.backend); put("consent",prefs.remoteConsent); put("quality",prefs.quality)
-        put("clips",JSONArray().apply { clips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id) }) } })
+        put("clips",JSONArray().apply { clips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id); put("origin",clip.originId) }) } })
         put("transcription_language",transcriptionLanguage)
         put("selected_clip",selectedClip)
         put("stabilize",stabilize)
+        put("gif_palette",gifPalette); put("gif_dither",gifDither)
     }
     companion object {
         fun restore(tool:String,json:String):EditorState {
             val r=JSONObject(json); val a=r.optJSONArray("inputs") ?: JSONArray()
             val timeline=r.optJSONArray("clips")
-            val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),c.optString("id",UUID.randomUUID().toString())) }
+            val clips=if(timeline==null)emptyList() else List(timeline.length()) { index -> val c=timeline.getJSONObject(index); val id=c.optString("id").ifBlank { UUID.randomUUID().toString() }; ClipEdit(c.getString("path"),c.getLong("start"),c.getLong("end"),c.getLong("duration"),id,c.optString("origin",id).ifBlank { id }) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"))
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"))
         }
     }
 }
@@ -69,17 +72,42 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val backendReport=MutableStateFlow<JSONObject?>(null)
     val active=MutableStateFlow<String?>(null)
     val work=WorkManager.getInstance(app)
-    fun open(tool:String) { editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
+    private val history=EditHistory<EditorState>()
+    val canUndo=MutableStateFlow(false); val canRedo=MutableStateFlow(false)
+    private fun updateHistory() { canUndo.value=history.canUndo; canRedo.value=history.canRedo }
+    private fun clearHistory() { history.clear(); updateHistory() }
+    private fun snapshot(e:EditorState)=e.copy(playheadMs=0,previewRequestMs=null,suggestions=emptyList(),suggestedClips=emptyList())
+    fun open(tool:String) { clearHistory(); editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
     fun back() { screen.value="home" }
-    fun edit(change:(EditorState)->EditorState) {
-        val old=editor.value; var next=change(old)
-        if(next.tool=="clipper" && next.clips.isNotEmpty() && (next.start!=old.start || next.end!=old.end)) {
-            val index=next.selectedClip.coerceIn(next.clips.indices)
-            val start=next.start.toDoubleOrNull(); val end=next.end.toDoubleOrNull()
-            if(start!=null && end!=null)next=next.copy(clips=next.clips.mapIndexed { i,c -> if(i==index)c.copy(startMs=(start*1000).toLong(),endMs=(end*1000).toLong()) else c })
-        }
-        editor.value=next
+    private fun trim(e:EditorState):ClipEdit? {
+        val clip=e.clips.getOrNull(e.selectedClip) ?: return null
+        val start=e.start.toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 && it<=clip.sourceDurationMs/1000.0 } ?: return null
+        val end=e.end.toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 && it<=clip.sourceDurationMs/1000.0 } ?: return null
+        return runCatching { clip.copy(startMs=(start*1000).roundToLong(),endMs=(end*1000).roundToLong()).validated() }.getOrNull()
     }
+    fun edit(group:String?=null,change:(EditorState)->EditorState) {
+        try {
+            val old=editor.value; var next=change(old)
+            if(next.tool=="clipper" && next.clips==old.clips && next.selectedClip==old.selectedClip && (next.start!=old.start || next.end!=old.end)) {
+                trim(next)?.let { edited -> next=next.copy(clips=next.clips.mapIndexed { i,c -> if(i==next.selectedClip)edited else c }) }
+            }
+            if(next.tool=="clipper" && next.clips!=old.clips) {
+                if(old.captions.isNotBlank() && next.captions==old.captions && next.clips.take(old.clips.size)!=old.clips) {
+                    val cues=CaptionTrack.parse(old.captions,old.clips.sumOf { it.durationMs }.coerceAtLeast(1))
+                    next=next.copy(captions=CaptionTrack.srt(CaptionTimeline.retime(cues,old.clips,next.clips)))
+                }
+                next=next.copy(suggestions=emptyList(),suggestedClips=emptyList())
+            }
+            history.record(snapshot(old),snapshot(next),group,android.os.SystemClock.uptimeMillis())
+            editor.value=next; updateHistory()
+        } catch(e:Exception) { message.value=e.message ?: "This edit could not be applied." }
+    }
+    private fun restoreHistory(state:EditorState) {
+        val index=state.selectedClip.coerceIn(0,state.clips.lastIndex.coerceAtLeast(0)); val clip=state.clips.getOrNull(index)
+        editor.value=state.copy(selectedClip=index,playheadMs=clip?.startMs ?: 0,previewRequestMs=clip?.startMs,suggestions=emptyList(),suggestedClips=emptyList()); updateHistory()
+    }
+    fun undo() { if(!importing.value)history.undo(snapshot(editor.value))?.let(::restoreHistory) }
+    fun redo() { if(!importing.value)history.redo(snapshot(editor.value))?.let(::restoreHistory) }
     fun launch(block:suspend()->Unit) { viewModelScope.launch { try { block() } catch(e:CancellationException) { throw e } catch(e:Exception) { message.value=e.message ?: "Operation failed." } catch(e:LinkageError) { message.value="Unsupported device: this native library cannot load on your CPU/Android version." } catch(e:OutOfMemoryError) { message.value="Not enough memory for this operation. Try a smaller input or a device with more RAM." } } }
     fun import(uris:List<Uri>,video:Boolean) = launch {
         importing.value=true
@@ -99,11 +127,11 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             val duration=durations.firstOrNull()?.div(1000.0) ?: 3.0
             val clips=if(video && editor.value.tool=="clipper")files.mapIndexed { i,f -> ClipEdit(f.path,0,durations[i],durations[i]) } else emptyList()
             val existing=editor.value
-            editor.value=if(existing.tool=="clipper" && existing.clips.isNotEmpty()) {
+            val next=if(existing.tool=="clipper" && existing.clips.isNotEmpty()) {
                 require(existing.clips.size+clips.size<=40) { "A timeline supports at most 40 blocks." }
                 existing.copy(inputs=(existing.inputs+files.map(File::getPath)).distinct(),clips=existing.clips+clips)
             } else existing.copy(inputs=files.map(File::getPath),video=video,start="0",end="${minOf(duration,if(existing.tool=="gif")5.0 else duration)}",clips=clips,selectedClip=0,playheadMs=0,suggestions=emptyList())
-            message.value="${files.size} media file(s) imported into private storage."
+            edit { next }; message.value="${files.size} media file(s) imported into private storage."
         } finally { importing.value=false }
     }
     fun model(uri:Uri) = launch {
@@ -132,7 +160,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             if(e.tool in setOf("photo","video","aigif")) { require(e.prompt.isNotBlank()) { "Enter a prompt." }; require(prefs.value.backend.isNotBlank() && prefs.value.remoteConsent) { "Set up an HTTPS backend and allow remote processing in Settings." } }
             else require(e.inputs.isNotEmpty()) { "Import media first." }
             if(e.tool=="clipper") {
-                require(e.start.toDoubleOrNull()!=null && e.end.toDoubleOrNull()!=null) { "Enter valid trim times." }
+                require(trim(e)==e.clips.getOrNull(e.selectedClip) && trim(e)!=null) { "Enter valid trim times and keep at least 40 milliseconds." }
                 e.clips.forEach { it.validated() }
                 CaptionTrack.parse(e.captions,e.clips.sumOf { it.durationMs }.coerceAtLeast(1))
             }
@@ -150,7 +178,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
             val clips=withContext(Dispatchers.IO) { restored.inputs.mapIndexed { index,path -> val d=VideoEngine.duration(File(path)); ClipEdit(path,if(index==0)((restored.start.toDoubleOrNull() ?: 0.0)*1000).toLong() else 0,if(index==0)((restored.end.toDoubleOrNull() ?: d/1000.0)*1000).toLong() else d,d) } }
             state=state.copy(clips=clips,playheadMs=clips.first().startMs)
         }
-        editor.value=state; screen.value="editor"
+        clearHistory(); editor.value=state; screen.value="editor"
     }
     fun retry(project:Project) = launch { enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output="")) }
     fun rename(project:Project,name:String) = launch { dao.rename(project.id,name.take(80).ifBlank { project.name }) }
@@ -178,28 +206,31 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         importing.value=true
         try { val e=editor.value; require(e.inputs.isNotEmpty() && e.video) { "Import a video first." }; val path=e.clips.getOrNull(e.selectedClip)?.path ?: e.inputs.first(); val points=if(silence)VideoEngine.silence(File(path)) else VideoEngine.scenes(File(path)); edit { it.copy(suggestions=points) }; message.value=if(points.isEmpty())"No ${if(silence)"quiet audio" else "scene cuts"} detected." else "${points.size} measured suggestions are ready. Tap a timestamp to seek, then split or trim." } finally { importing.value=false }
     }
-    fun split() = launch {
-        val e=editor.value; require(e.tool=="clipper" && e.clips.isNotEmpty()) { "Import a clip first." }
+    fun split() = edit { e ->
+        require(e.tool=="clipper" && e.clips.isNotEmpty()) { "Import a clip first." }
+        require(e.clips.size<40) { "A timeline supports at most 40 blocks." }
         val clips=Timeline.split(e.clips,e.selectedClip,e.playheadMs)
-        editor.value=e.copy(clips=clips,end="${clips[e.selectedClip].endMs/1000.0}")
+        e.copy(clips=clips,end="${clips[e.selectedClip].endMs/1000.0}")
     }
     fun selectClip(index:Int) {
         val e=editor.value; val clip=e.clips.getOrNull(index) ?: return
+        history.endGroup()
         editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList(),suggestedClips=emptyList())
     }
     fun moveClip(direction:Int) {
         val e=editor.value; if(e.clips.isEmpty())return
         val target=(e.selectedClip+direction).coerceIn(e.clips.indices)
-        editor.value=e.copy(clips=Timeline.move(e.clips,e.selectedClip,direction),selectedClip=target)
+        edit { it.copy(clips=Timeline.move(it.clips,it.selectedClip,direction),selectedClip=target) }
     }
     fun removeClip() {
         val e=editor.value; if(e.clips.isEmpty())return
         val clips=e.clips.filterIndexed { i,_ -> i!=e.selectedClip }
-        editor.value=e.copy(clips=clips,inputs=clips.map { it.path }.distinct(),selectedClip=0,suggestions=emptyList(),suggestedClips=emptyList())
-        if(clips.isNotEmpty())selectClip(0)
+        val first=clips.firstOrNull()
+        edit { it.copy(clips=clips,inputs=clips.map { clip -> clip.path }.distinct(),selectedClip=0,start="${(first?.startMs ?: 0)/1000.0}",end="${(first?.endMs ?: 0)/1000.0}",playheadMs=first?.startMs ?: 0,previewRequestMs=first?.startMs) }
     }
     fun seek(ms:Long) {
         val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip) ?: return
+        history.endGroup()
         val position=ms.coerceIn(clip.startMs,clip.endMs.coerceAtLeast(clip.startMs))
         editor.value=e.copy(playheadMs=position,previewRequestMs=position)
     }
@@ -215,9 +246,10 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun clean() = launch {
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }
+        val retained=(history.states()+editor.value).flatMap { it.inputs+it.clips.map { clip -> clip.path } }.toSet()
         withContext(Dispatchers.IO) {
             app.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            val used=projects.value.flatMap { p -> runCatching { val a=JSONObject(p.recipe).optJSONArray("inputs"); if(a==null)emptyList() else List(a.length()){a.getString(it)} }.getOrDefault(emptyList()) }.toSet()+editor.value.inputs
+            val used=projects.value.flatMap { p -> runCatching { val a=JSONObject(p.recipe).optJSONArray("inputs"); if(a==null)emptyList() else List(a.length()){a.getString(it)} }.getOrDefault(emptyList()) }.toSet()+retained
             File(app.filesDir,"imports").listFiles()?.filter { it.path !in used }?.forEach { it.delete() }
         }; message.value="Cache and unused imports cleared."
     }
@@ -273,7 +305,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         val duration=state.clips.sumOf { it.durationMs }; val offset=recipe.optLong("caption_offset",0)
         val replacement=withContext(Dispatchers.IO) { CaptionTrack.parse(File(project.output).readText(),duration) }
         val combined=CaptionTrack.replaceRange(CaptionTrack.parse(state.captions,duration),replacement,offset,offset+clip.durationMs)
-        editor.value=state.copy(captions=CaptionTrack.srt(combined)); screen.value="editor"
+        clearHistory(); editor.value=state.copy(captions=CaptionTrack.srt(combined)); screen.value="editor"
         message.value="Subtitles applied to the saved timeline snapshot. Review text and timing before exporting."
     }
 }
