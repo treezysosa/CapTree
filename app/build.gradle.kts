@@ -59,7 +59,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.6.1")
     implementation("androidx.media3:media3-transformer:1.6.1")
     implementation("androidx.media3:media3-effect:1.6.1")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

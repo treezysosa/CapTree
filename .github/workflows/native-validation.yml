@@ -1,0 +1,77 @@
+name: Validate packaged ONNX runtime
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-validation.yml'
+      - 'app/build.gradle.kts'
+      - 'app/src/main/java/studio/retro/ai/media/UpscaleEngine.kt'
+      - 'app/src/main/java/studio/retro/ai/media/ModelValidator.kt'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-onnx-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install 'numpy<2' basicsr==1.4.2 onnx==1.16.2 onnxruntime==1.19.2 Pillow==11.2.1
+      - name: Export official pretrained weights and CPU golden output
+        run: |
+          mkdir -p model-validation/realesrgan
+          curl --fail --location --retry 3 --max-time 300 https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -o model-validation/RealESRGAN_x4plus.pth
+          python tools/export_realesrgan.py model-validation/RealESRGAN_x4plus.pth model-validation/realesrgan/realesrgan-x4.onnx
+          python tools/validate_real_models.py realesrgan --model model-validation/realesrgan/realesrgan-x4.onnx --weights model-validation/RealESRGAN_x4plus.pth --output model-validation/realesrgan
+          curl --fail --location --retry 3 --max-time 60 https://raw.githubusercontent.com/xinntao/Real-ESRGAN/v0.3.0/LICENSE -o model-validation/realesrgan/Real-ESRGAN-LICENSE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-validation-reference
+          path: model-validation/realesrgan/
+          retention-days: 14
+  inference:
+    needs: reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-validation-reference
+          path: app/src/androidTest/assets/validation
+      - run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          heap-size: 256M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -memory 2048
+          script: ./gradlew --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=studio.retro.ai.PretrainedModelTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packaged-onnx-inference-api-${{ matrix.api }}
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          retention-days: 14
