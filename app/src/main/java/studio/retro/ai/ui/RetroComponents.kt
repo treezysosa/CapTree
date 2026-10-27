@@ -21,7 +21,7 @@ val Navy=Color(0xFF24253C)
 val Screen=Color(0xFF151827)
 val PixelFont=FontFamily(Font(R.font.press_start))
 val LocalConsole=staticCompositionLocalOf { ConsoleColors(Color(0xFF6555B7),Color(0xFF80C9DB),Color(0xFFE58BAF),Color(0xFFA8C45A),Navy) }
-@Composable fun RetroTheme(theme:String,content:@Composable()->Unit) {
+@Composable fun RetroTheme(theme:String,content: @Composable () -> Unit) {
     val colors=when(theme) {
         "Glacier Blue"->ConsoleColors(Color(0xFF38768E),Color(0xFFACE8EE),Color(0xFF26455B),Color(0xFFCEEFE5),Navy)
         "Retro Green"->ConsoleColors(Color(0xFF667849),Color(0xFFD0DDA7),Color(0xFF424840),Color(0xFFA8C45A),Color(0xFF24321C))

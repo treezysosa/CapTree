@@ -24,9 +24,9 @@ object UpscaleEngine {
             options.setIntraOpNumThreads(2)
             env.createSession(model.path,options).use { session ->
                 val inputInfo=session.inputInfo.values.first().info as? TensorInfo ?: error("Model must accept a tensor.")
-                require(inputInfo.type==OnnxJavaType.FLOAT && inputInfo.shape.size==4) { "Model requires float32 [1,3,H,W] input." }
+                require(inputInfo.type==OnnxJavaType.FLOAT && inputInfo.shape.size==4 && inputInfo.shape[0] in listOf(-1L,1L) && inputInfo.shape[1]==3L) { "Model requires float32 [1,3,H,W] input." }
                 val tile=64; val halo=16; val size=tile+halo*2
-                require(inputInfo.shape[2]<=0 || inputInfo.shape[2]==size.toLong()) { "Model must use dynamic spatial axes or fixed 96×96 input." }
+                require((inputInfo.shape[2]<=0 || inputInfo.shape[2]==size.toLong()) && (inputInfo.shape[3]<=0 || inputInfo.shape[3]==size.toLong())) { "Model must use dynamic spatial axes or fixed 96×96 input." }
                 val output=Bitmap.createBitmap(image.width*4,image.height*4,Bitmap.Config.ARGB_8888)
                 val total=((image.width+tile-1)/tile)*((image.height+tile-1)/tile); var done=0
                 try {

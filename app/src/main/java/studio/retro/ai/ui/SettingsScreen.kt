@@ -21,7 +21,9 @@ import java.io.File
     var url by remember(prefs.backend) { mutableStateOf(prefs.backend) }
     var token by remember { mutableStateOf("") }
     var modelInstalled by remember { mutableStateOf(File(context.filesDir,"models/realesrgan-x4.onnx").exists()) }
-    val model=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null) { vm.model(uri); modelInstalled=true } }
+    val importing by vm.importing.collectAsStateWithLifecycle()
+    LaunchedEffect(importing) { if(!importing)modelInstalled=File(context.filesDir,"models/realesrgan-x4.onnx").exists() }
+    val model=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.model(uri) }
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
         PixelText("CONSOLE SETTINGS",color=LocalConsole.current.lcd)
         Choice("SHELL THEME",listOf("Classic Purple","Glacier Blue","Retro Green"),prefs.theme) { value -> vm.launch { vm.settings.theme(value) } }

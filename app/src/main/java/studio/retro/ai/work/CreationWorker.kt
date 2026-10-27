@@ -57,14 +57,15 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                     val prefs=app.settings.flow.first()
                     require(prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Confirm remote processing for this backend in Settings." }
                     val client=BackendClient(prefs.backend,BackendSecrets(applicationContext).read())
-                    client.generate(recipe,inputs.firstOrNull(),output) { value,message -> progress(value,message) }
+                    val seed=client.generate(recipe,inputs.firstOrNull(),output) { value,message -> progress(value,message) }
+                    if(seed>=0)recipe.put("seed",seed)
                 }
                 else -> error("Unknown tool.")
             }
             require(output.isFile && output.length()>0) { "The processor produced no output." }
             val latest=dao.get(id)
             if(latest==null) { output.delete(); return@withContext Result.failure() }
-            dao.save(latest.copy(status="completed",output=output.path,mime=mime,error=""))
+            dao.save(latest.copy(status="completed",recipe=recipe.toString(),output=output.path,mime=mime,error=""))
             Result.success(workDataOf("path" to output.path))
         } catch(e:CancellationException) {
             output.delete(); withContext(NonCancellable) { dao.get(id)?.let { dao.save(it.copy(status="cancelled",error="Cancelled. Your imported files are kept for resuming.")) } }; throw e

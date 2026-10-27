@@ -93,7 +93,8 @@ class InferenceEngine:
             if job.cancel.is_set():
                 raise GenerationCancelled()
             job.stage = "Video diffusion" if video else "Image diffusion"
-            job.progress = min(99, round((index + 1) / steps * 100))
+            total = max(1, getattr(pipeline, "num_timesteps", steps))
+            job.progress = min(99, round((index + 1) / total * 100))
             return kwargs
 
         kwargs = dict(prompt=prompt, num_inference_steps=steps, generator=generator, callback_on_step_end=callback)

@@ -17,7 +17,10 @@ import kotlin.math.*
 
 data class Segment(val file: File, val start: Long, val end: Long)
 object VideoEngine {
-    fun duration(file:File):Long = MediaMetadataRetriever().use { it.setDataSource(file.path); it.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: error("Cannot read video duration.") }
+    fun duration(file:File):Long {
+        val reader=MediaMetadataRetriever()
+        try { reader.setDataSource(file.path); return reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: error("Cannot read video duration.") } finally { reader.release() }
+    }
     suspend fun export(context:Context, segments:List<Segment>, output:File, aspect:String, enhance:Float, captions:List<Pair<Long,String>>, progress:(Int?)->Unit) = withContext(Dispatchers.Main) {
         require(segments.isNotEmpty()) { "Import at least one video." }
         val effects=mutableListOf<Effect>()
@@ -63,7 +66,8 @@ object VideoEngine {
     /** Histogram changes at one-second intervals: deterministic scene suggestions, not AI claims. */
     suspend fun scenes(file:File):List<Long> = withContext(Dispatchers.Default) {
         val result=mutableListOf<Long>(); var previous:FloatArray?=null
-        MediaMetadataRetriever().use { reader ->
+        val reader=MediaMetadataRetriever()
+        try {
             reader.setDataSource(file.path)
             for(t in 0L until duration(file) step 1000L) {
                 currentCoroutineContext().ensureActive()
@@ -73,7 +77,7 @@ object VideoEngine {
                 pixels.forEach { val l=((it ushr 16 and 255)*54+(it ushr 8 and 255)*183+(it and 255)*19) shr 8; hist[l/16]+=1f/pixels.size }
                 previous?.let { old -> if(hist.indices.sumOf { abs(hist[it]-old[it]).toDouble() }>0.65)result+=t }; previous=hist
             }
-        }
+        } finally { reader.release() }
         result
     }
     /** Decode PCM and detect low-energy windows; requires an audio track. */

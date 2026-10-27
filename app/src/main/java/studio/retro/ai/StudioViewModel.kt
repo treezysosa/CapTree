@@ -134,7 +134,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun split() = launch {
         val e=editor.value; require(e.tool=="clipper" && e.inputs.isNotEmpty()) { "Import a clip first." }
         val start=(e.start.toDoubleOrNull() ?: 0.0); val end=e.end.toDoubleOrNull() ?: error("Enter end time."); require(end>start) { "End must be after start." }; val middle=(start+end)/2
-        for((a,b) in listOf(start to middle,middle to end)) { val piece=e.copy(start="$a",end="$b"); val id=UUID.randomUUID().toString(); dao.save(Project(id,"SPLIT ${a}s – ${b}s","clipper",piece.recipe(prefs.value).toString())) }; message.value="Split into two editable drafts in Projects. Resume either to export."
+        for((a,b) in listOf(start to middle,middle to end)) { val piece=e.copy(inputs=listOf(e.inputs.first()),start="$a",end="$b"); val id=UUID.randomUUID().toString(); dao.save(Project(id,"SPLIT ${a}s – ${b}s","clipper",piece.recipe(prefs.value).toString())) }; message.value="First clip split into two editable drafts in Projects. Resume either to export."
     }
     fun clean() = launch {
         require(projects.value.none { it.status in setOf("queued","processing") }) { "Wait for processing to finish before cleaning storage." }

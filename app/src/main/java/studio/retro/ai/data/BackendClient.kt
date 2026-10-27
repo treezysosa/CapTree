@@ -28,10 +28,11 @@ class BackendClient(endpoint:String, private val token:String) {
         JSONObject(body)
     }
     suspend fun health():JSONObject = json(request("/v1/health").get().build())
-    suspend fun generate(recipe:JSONObject, input:File?, output:File, progress:suspend(Int?,String)->Unit) {
+    suspend fun generate(recipe:JSONObject, input:File?, output:File, progress:suspend(Int?,String)->Unit):Long {
         val payload=JSONObject(recipe.toString()).apply { remove("inputs"); remove("backend"); remove("consent") }
         val body=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("payload",payload.toString()).apply { input?.let { addFormDataPart("image","input.png",it.asRequestBody("application/octet-stream".toMediaType())) } }.build()
         var id:String?=null
+        var actualSeed=-1L
         try {
             id=json(request("/v1/jobs").post(body).build()).getString("id")
             withTimeout(8*60*1000L) {
@@ -39,13 +40,14 @@ class BackendClient(endpoint:String, private val token:String) {
                     currentCoroutineContext().ensureActive()
                     val status=json(request("/v1/jobs/$id").get().build())
                     when(status.getString("status")) {
-                        "completed"->break
+                        "completed"->{ actualSeed=status.optLong("seed",-1L); break }
                         "failed"->error(status.optString("error","Inference failed."))
                         "cancelled"->throw CancellationException("Server cancelled generation.")
                     }
                     progress(if(status.isNull("progress"))null else status.getInt("progress"),status.optString("stage","Remote inference")); delay(1500)
                 }
             }
+            progress(null,"DOWNLOADING CREATION...")
             execute(request("/v1/jobs/$id/result").get().build()).use { response ->
                 require(response.isSuccessful) { "Cannot download generated media (${response.code})." }
                 response.body!!.byteStream().use { source -> output.outputStream().use { sink -> val buffer=ByteArray(65536); var total=0L; while(true) { currentCoroutineContext().ensureActive(); val n=source.read(buffer); if(n<0)break; total+=n; require(total<=200L*1024*1024) { "Remote output exceeds 200 MB." }; sink.write(buffer,0,n) } } }
@@ -56,5 +58,6 @@ class BackendClient(endpoint:String, private val token:String) {
         } finally {
             if(id!=null) withContext(NonCancellable) { runCatching { execute(request("/v1/jobs/$id/purge").delete().build()).close() } }
         }
+        return actualSeed
     }
 }
