@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     val importing by vm.importing.collectAsStateWithLifecycle()
     var confirmTranscription by remember { mutableStateOf(false) }
     val confirmFace by vm.faceConfirmation.collectAsStateWithLifecycle()
+    val confirmHighlights by vm.highlightConfirmation.collectAsStateWithLifecycle()
     val isAI=e.tool in setOf("photo","video","aigif")
     val title=if(e.tool=="aigif")"AI ANIMATION" else ToolNames[ToolIds.indexOf(e.tool).coerceAtLeast(0)].replace('\n',' ')
     ConsolePanel(Modifier.fillMaxSize().verticalScroll(rememberScrollState()),lcd=true) {
@@ -81,6 +82,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
                 }
                 if(e.suggestions.isNotEmpty())LazyRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { items(e.suggestions.size) { index -> TextButton({ vm.seek(e.suggestions[index]) }) { Text("${e.suggestions[index]/1000.0}s") } } }
                 Text("Suggestions rank scene changes, quiet audio and caption activity within a selected range up to two minutes. Scores are conventional signals, not semantic AI judgments. Captions follow the footage when a range is applied.",fontSize=11.sp,color=LocalConsole.current.accent)
+                PixelText("AI VISUAL MATCHES",size=9,color=LocalConsole.current.lcd)
+                RetroField("FIND IN THIS CLIP",e.highlightPrompt,{ value -> vm.edit("highlight-prompt") { it.copy(highlightPrompt=value) } },multiline=true)
+                Choice("SUGGESTED CLIP LENGTH · SECONDS",listOf("3","6","10"),"${e.highlightSeconds}") { value -> vm.edit { it.copy(highlightSeconds=value.toInt()) } }
+                RaisedButton("AI VISUAL HIGHLIGHTS · SERVER",{ vm.semanticHighlights() },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
+                RaisedButton("HIGHLIGHT SERVER SETTINGS",{ vm.screen.value="settings" })
+                Text("Optional CPU CLIP compares up to 24 small still frames with your description. It does not listen to audio or understand full motion. Fast events between samples may be missed; every clip has a best match even when nothing is relevant. Scores are cosine similarity, not a confidence percentage. Requires your server and a separate frame-upload confirmation.",fontSize=11.sp)
+                if(e.semanticClips.isNotEmpty())Text("${e.semanticSampleCount} frames sampled · saved description: ${e.highlightPrompt}",fontSize=12.sp,color=LocalConsole.current.accent)
+                for(range in e.semanticClips) {
+                    Text("${range.startMs/1000.0}–${range.endMs/1000.0}s · cosine ${"%.3f".format(java.util.Locale.US,range.score)}",fontSize=12.sp,color=LocalConsole.current.lcd)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        RaisedButton("PREVIEW MATCH",{ vm.seek((range.startMs+range.endMs)/2) },Modifier.weight(1f))
+                        RaisedButton("USE AI RANGE",{ vm.useSemanticRange(range) },Modifier.weight(1f))
+                    }
+                }
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("IMPORT SRT",{ subtitlePicker.launch(arrayOf("application/x-subrip","text/plain","*/*")) },Modifier.weight(1f)); RaisedButton("EXPORT SRT",{ subtitleExport.launch("RETRO-captions.srt") },Modifier.weight(1f),enabled=e.captions.isNotBlank()) }
                 Choice("SPEECH LANGUAGE",listOf("auto","en","es","fr","de","ja"),e.transcriptionLanguage) { value -> vm.edit { it.copy(transcriptionLanguage=value) } }
                 RaisedButton("AI AUTO SUBTITLES · SERVER",{ confirmTranscription=true },Modifier.fillMaxWidth(),LocalConsole.current.pink,enabled=e.clips.isNotEmpty())
@@ -122,6 +137,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
         RaisedButton(if(isAI)"START GENERATION" else "START PROCESSING",{ vm.create() },Modifier.fillMaxWidth(),LocalConsole.current.pink)
         RaisedButton("SAVE UNFINISHED PROJECT",{ vm.create(true) },Modifier.fillMaxWidth())
     }
+    confirmHighlights?.let { pending -> AlertDialog(
+        onDismissRequest={ vm.highlightConfirmation.value=null },
+        title={ PixelText("SEND SELECTED FRAMES?",size=9,color=LocalConsole.current.lcd) },
+        text={ Text("Up to 24 JPEG thumbnails (256 pixels maximum edge) from clip ${pending.state.selectedClip+1}'s selected trim and your visual description will be sent to ${pending.backend}. Audio, full video and source metadata stay on this phone. The server uses CPU CLIP; results reopen this saved timeline for review. Sampled frames can still contain private content. Suggested length is capped to the trim length.") },
+        confirmButton={ TextButton({ vm.semanticHighlights(confirmed=true) }) { Text("SEND FRAMES") } },
+        dismissButton={ TextButton({ vm.highlightConfirmation.value=null }) { Text("CANCEL") } }
+    ) }
     if(confirmTranscription)AlertDialog(
         onDismissRequest={ confirmTranscription=false },
         title={ PixelText("SEND SELECTED AUDIO?",size=9,color=LocalConsole.current.lcd) },

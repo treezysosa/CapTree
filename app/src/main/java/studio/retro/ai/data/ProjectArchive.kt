@@ -19,10 +19,10 @@ object ProjectArchive {
     const val MAX_FILE=512L*1024*1024
     const val MAX_TOTAL=1024L*1024*1024
     private const val MAX_METADATA=2*1024*1024
-    private val tools=setOf("upscale","video","photo","clipper","enhance","gif","aigif","transcribe")
-    private val mimes=setOf("image/jpeg","image/png","image/webp","image/gif","video/mp4","application/x-subrip")
-    private val extensions=setOf("jpg","jpeg","png","webp","gif","mp4","mov","mkv","webm","srt")
-    private val scalars=setOf("tool","video","start","end","fps","speed","width","loop","caption","sticker","format","scale","intensity","denoise","sharpen","prompt","negative","style","aspect","seed","duration","motion","captions","transcription_language","selected_clip","stabilize","gif_palette","gif_dither","face_restore","face_strength","face_restoration_applied","transcribe_index","caption_offset","quality")
+    private val tools=setOf("upscale","video","photo","clipper","enhance","gif","aigif","transcribe","highlights")
+    private val mimes=setOf("image/jpeg","image/png","image/webp","image/gif","video/mp4","application/x-subrip","application/json")
+    private val extensions=setOf("jpg","jpeg","png","webp","gif","mp4","mov","mkv","webm","srt","json")
+    private val scalars=setOf("tool","video","start","end","fps","speed","width","loop","caption","sticker","format","scale","intensity","denoise","sharpen","prompt","negative","style","aspect","seed","duration","motion","captions","transcription_language","selected_clip","stabilize","gif_palette","gif_dither","face_restore","face_strength","face_restoration_applied","transcribe_index","caption_offset","quality","highlight_prompt","highlight_clip_ms","highlight_index")
     private data class Asset(val key:String,val file:File,val size:Long,val hash:String,val crc:Long)
     fun interruptedStaging(filesRoot:File):List<File> {
         val directory=File(filesRoot,"restore-temp").canonicalFile
@@ -132,7 +132,7 @@ object ProjectArchive {
                 val declared=LinkedHashMap<String,JSONObject>(); var total=0L
                 for(i in 0 until array.length()) {
                     val asset=array.getJSONObject(i); val key=asset.getString("key"); val size=asset.getLong("size")
-                    require(Regex("assets/[0-9]{4}\\.(jpg|jpeg|png|webp|gif|mp4|mov|mkv|webm|srt)").matches(key) && key !in declared) { "Unsafe or duplicate backup asset name." }
+                    require(Regex("assets/[0-9]{4}\\.(jpg|jpeg|png|webp|gif|mp4|mov|mkv|webm|srt|json)").matches(key) && key !in declared) { "Unsafe or duplicate backup asset name." }
                     require(size in 1..MAX_FILE && Regex("[a-f0-9]{64}").matches(asset.getString("sha256"))) { "Invalid backup asset metadata." }
                     total+=size; require(total<=MAX_TOTAL) { "Backup exceeds the 1 GB import limit." }; declared[key]=asset
                 }

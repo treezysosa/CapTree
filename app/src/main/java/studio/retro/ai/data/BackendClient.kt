@@ -30,7 +30,7 @@ class BackendClient(endpoint:String,private val token:String,private val client:
     suspend fun health():JSONObject=json(request("/v1/health").get().build()).also { verifiedHealth=it }
     suspend fun requireCapability(feature:String) {
         val status=verifiedHealth ?: health()
-        require(status.optInt("api_version",1)>=2) { "Update your self-hosted backend to v0.3 for readiness checks and subtitles." }
+        require(status.optInt("api_version",1)>=2) { "Update your self-hosted backend for feature readiness checks." }
         val features=status.optJSONArray("features") ?: error("Backend omitted its feature report.")
         val entry=(0 until features.length()).map { features.getJSONObject(it) }.firstOrNull { it.optString("id")==feature } ?: error("Backend does not support $feature.")
         require(entry.optBoolean("supported")) { entry.optString("reason","Backend feature is unsupported.") }
@@ -54,11 +54,25 @@ class BackendClient(endpoint:String,private val token:String,private val client:
         requireCapability("face-restoration")
         submit("/v1/face-restorations",JSONObject().put("tool","restore-face").put("strength",strength.toDouble()),image,"image","image/png",output,"image/png",progress)
     }
+    suspend fun highlights(prompt:String,durationMs:Long,clipMs:Long,times:List<Long>,frames:List<File>,output:File,progress:suspend(Int?,String)->Unit) {
+        require(prompt.isNotBlank() && prompt.length<=300 && durationMs in 1000..120000 && clipMs in 1000..minOf(15000,durationMs)) { "Choose a visual description and a valid selected trim." }
+        require(times.size in 1..24 && times==times.distinct().sorted() && times.all { it in 0 until durationMs } && frames.size==times.size)
+        require(frames.all { it.length() in 1..256L*1024 }) { "Upload at most 24 sampled JPEGs, each up to 256 KB." }
+        requireCapability("semantic-highlights")
+        val payload=JSONObject().put("tool","highlights").put("prompt",prompt).put("duration_ms",durationMs).put("clip_ms",clipMs).put("timestamps_ms",org.json.JSONArray(times))
+        val body=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("payload",payload.toString()).apply {
+            frames.forEachIndexed { i,file -> addFormDataPart("frames","${i.toString().padStart(4,'0')}.jpg",file.asRequestBody("image/jpeg".toMediaType())) }
+        }.build()
+        submitBody("/v1/highlights",body,output,"application/json",65536,"SENDING SELECTED FRAMES...",progress)
+    }
     private suspend fun submit(path:String,payload:JSONObject,input:File?,field:String,mime:String,output:File,expectedMime:String,progress:suspend(Int?,String)->Unit):Long {
         val body=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("payload",payload.toString()).apply { input?.let { addFormDataPart(field,if(field=="audio")"selected.wav" else "input.png",it.asRequestBody(mime.toMediaType())) } }.build()
+        return submitBody(path,body,output,expectedMime,if(field=="audio")1_000_000L else 200L*1024*1024,if(field=="audio")"SENDING SELECTED AUDIO..." else "SENDING GENERATION REQUEST...",progress)
+    }
+    private suspend fun submitBody(path:String,body:RequestBody,output:File,expectedMime:String,limit:Long,stage:String,progress:suspend(Int?,String)->Unit):Long {
         var id:String?=null; var actualSeed=-1L; var complete=false
         try {
-            progress(null,if(field=="audio")"SENDING SELECTED AUDIO..." else "SENDING GENERATION REQUEST...")
+            progress(null,stage)
             id=json(request(path).post(body).build()).getString("id")
             withTimeout(8*60*1000L) {
                 while(true) {
@@ -76,7 +90,6 @@ class BackendClient(endpoint:String,private val token:String,private val client:
             execute(request("/v1/jobs/$id/result").get().build()).use { response ->
                 require(response.isSuccessful) { "Cannot download result (${response.code})." }
                 require(response.header("Content-Type").orEmpty().substringBefore(';').trim()==expectedMime) { "Backend returned an unexpected media type." }
-                val limit=if(field=="audio")1_000_000L else 200L*1024*1024
                 response.body!!.byteStream().use { source -> output.outputStream().use { sink -> val buffer=ByteArray(65536); var total=0L; while(true) { currentCoroutineContext().ensureActive(); val n=source.read(buffer); if(n<0)break; total+=n; require(total<=limit) { "Remote output is too large." }; sink.write(buffer,0,n) } } }
             }
             complete=true

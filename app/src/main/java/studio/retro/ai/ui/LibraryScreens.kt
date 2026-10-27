@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
     var backupProject by remember { mutableStateOf<Project?>(null) }
     val backupPicker=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> val project=backupProject; backupProject=null; if(uri!=null && project!=null)vm.backup(project,uri) }
     val importPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null)vm.importBackup(uri) }
-    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Favorites"->it.favorite; else->true } }
+    val visible=projects.filter { (!gallery || it.status=="completed") && when(filter) { "Photos"->it.mime.startsWith("image/") && it.mime!="image/gif"; "Videos"->it.mime.startsWith("video/"); "GIFs"->it.mime=="image/gif"; "Captions"->it.mime=="application/x-subrip"; "Highlights"->it.tool=="highlights"; "Favorites"->it.favorite; else->true } }
     ConsolePanel(Modifier.fillMaxSize(),lcd=true) {
         PixelText(if(gallery)"PIXEL GALLERY" else "SAVE GAME MENU",color=LocalConsole.current.lcd)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("PROJECTS",{ vm.screen.value="projects" },Modifier.weight(1f)); RaisedButton("GALLERY",{ vm.screen.value="gallery" },Modifier.weight(1f)) }
@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
             RaisedButton("IMPORT PROJECT BACKUP",{ importPicker.launch(arrayOf("application/zip","application/octet-stream","*/*")) },Modifier.fillMaxWidth())
             Text("Backups contain media and edits. Server settings, credentials and model weights are excluded.",fontSize=11.sp)
         }
-        Choice("FILTER",listOf("All","Photos","Videos","GIFs","Captions","Favorites"),filter) { filter=it }
+        Choice("FILTER",listOf("All","Photos","Videos","GIFs","Captions","Highlights","Favorites"),filter) { filter=it }
         if(visible.isEmpty())Text("Your save slots are empty. Press START to create something.",fontSize=14.sp)
         LazyColumn(verticalArrangement=Arrangement.spacedBy(12.dp)) {
             items(visible,key={it.id}) { p ->
@@ -89,7 +89,11 @@ import kotlinx.coroutines.withContext
     if(p.tool in setOf("enhance","upscale") && !source.isNullOrBlank()) {
         Choice("COMPARISON",if(p.mime.startsWith("video/"))listOf("Before","After","Linked") else listOf("Before","After","Wipe"),comparison) { comparison=it }
     }
-    if(p.mime=="application/x-subrip") {
+    if(p.tool=="highlights") {
+        Text("CLIP visual matches · ${runCatching { JSONObject(p.recipe).optString("highlight_prompt") }.getOrDefault("")}",fontSize=12.sp)
+        Text("Review ranked ranges on the saved timeline. Similarity scores measure sampled still-frame relevance and need human review.",fontSize=12.sp)
+        RaisedButton("REVIEW AI HIGHLIGHT RANGES",{ vm.applyHighlights(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
+    } else if(p.mime=="application/x-subrip") {
         val captions by produceState("Loading subtitles…",p.output) { value=withContext(Dispatchers.IO) { File(p.output).readText().take(12000) } }
         Text(captions,fontSize=12.sp,maxLines=20)
         RaisedButton("REOPEN TIMELINE WITH SUBTITLES",{ vm.applyTranscript(p) },Modifier.fillMaxWidth(),LocalConsole.current.pink)
@@ -97,6 +101,6 @@ import kotlinx.coroutines.withContext
     Text("${File(p.output).length()/1024} KB · ${p.mime}",fontSize=11.sp,color=LocalConsole.current.accent)
     if(runCatching { JSONObject(p.recipe).optBoolean("face_restoration_applied") }.getOrDefault(false))Text("GFPGAN face restoration · self-hosted processing",fontSize=11.sp,color=LocalConsole.current.accent)
     if(p.tool in setOf("photo","video","aigif"))Text("SEED · ${runCatching { JSONObject(p.recipe).optLong("seed",-1) }.getOrDefault(-1)}",fontSize=11.sp,color=LocalConsole.current.accent)
-    if(p.mime!="application/x-subrip" && android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
+    if((p.mime.startsWith("image/") || p.mime.startsWith("video/")) && android.os.Build.VERSION.SDK_INT>=29)RaisedButton("SAVE TO GALLERY",{ vm.saveGallery(p) },Modifier.fillMaxWidth())
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) { RaisedButton("EXPORT FILE",{ export.launch("RETRO_${p.id}.${File(p.output).extension}") },Modifier.weight(1f)); RaisedButton("SHARE",{ vm.share(p) },Modifier.weight(1f),LocalConsole.current.pink) }
 }

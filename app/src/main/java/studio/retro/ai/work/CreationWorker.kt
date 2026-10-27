@@ -17,11 +17,11 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
         val project=dao.get(id) ?: return@withContext Result.failure()
         val recipe=JSONObject(project.recipe); val tool=project.tool
         val outputDir=File(applicationContext.filesDir,"outputs").apply { mkdirs() }
-        val mp4=tool!="transcribe" && (recipe.optString("format")=="MP4" || tool=="video" || tool=="clipper" || (tool=="enhance" && recipe.optBoolean("video")))
+        val mp4=tool !in setOf("transcribe","highlights") && (recipe.optString("format")=="MP4" || tool=="video" || tool=="clipper" || (tool=="enhance" && recipe.optBoolean("video")))
         val jpeg=tool in setOf("enhance","upscale") && !mp4 && recipe.optInt("quality",92)<100
-        val suffix=if(tool=="transcribe")"srt" else if(mp4)"mp4" else if(tool in setOf("gif","aigif"))"gif" else if(jpeg)"jpg" else "png"
+        val suffix=if(tool=="highlights")"json" else if(tool=="transcribe")"srt" else if(mp4)"mp4" else if(tool in setOf("gif","aigif"))"gif" else if(jpeg)"jpg" else "png"
         val output=File(outputDir,"$id.$suffix")
-        val mime=if(tool=="transcribe")"application/x-subrip" else if(mp4)"video/mp4" else if(suffix=="gif")"image/gif" else if(jpeg)"image/jpeg" else "image/png"
+        val mime=if(tool=="highlights")"application/json" else if(tool=="transcribe")"application/x-subrip" else if(mp4)"video/mp4" else if(suffix=="gif")"image/gif" else if(jpeg)"image/jpeg" else "image/png"
         suspend fun progress(value:Int?,message:String) { setProgress(workDataOf("percent" to (value ?: -1),"message" to message)) }
         try {
             if(dao.status(id,"processing")==0)return@withContext Result.failure()
@@ -84,6 +84,25 @@ class CreationWorker(context:Context, params:WorkerParameters):CoroutineWorker(c
                         if(recipe.optBoolean("video")) { val duration=VideoEngine.duration(inputs.first()); VideoEngine.export(applicationContext,listOf(Segment(inputs.first(),recipe.optLong("start",0),recipe.optLong("end",duration))),output,"Original",0f,emptyList(),animation=animation) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) } }
                         else VideoEngine.imagesToMp4(applicationContext,inputs,output,recipe.optInt("fps",8),animation=animation,preparing={value -> setProgressAsync(workDataOf("percent" to value,"message" to "PREPARING ANIMATION FRAMES...")) }) { value -> setProgressAsync(workDataOf("percent" to (value ?: -1),"message" to "RENDERING VIDEO...")) }
                     } else GifEngine.create(inputs,recipe.optBoolean("video"),output,recipe.optLong("start"),recipe.optLong("end",3000),recipe.optInt("fps",8),recipe.optDouble("speed",1.0).toFloat(),recipe.optInt("width",320),recipe.optBoolean("loop",true),recipe.optString("caption"),recipe.optString("sticker"),recipe.optString("gif_palette","Classic 256"),recipe.optBoolean("gif_dither")) { progress(it,"ENCODING ANIMATION...") }
+                }
+                "highlights" -> {
+                    val prefs=app.settings.flow.first()
+                    require(recipe.optBoolean("highlight_upload_confirmed") && prefs.remoteConsent && recipe.optBoolean("consent") && prefs.backend==recipe.optString("backend")) { "Confirm selected-frame upload before semantic highlights." }
+                    val client=BackendClient(prefs.backend,BackendSecrets(applicationContext).read())
+                    client.requireCapability("semantic-highlights")
+                    val selected=recipe.getJSONArray("clips").getJSONObject(recipe.getInt("highlight_index"))
+                    val source=File(selected.getString("path")).canonicalFile
+                    require(source in inputs) { "Invalid selected video source." }
+                    val start=selected.getLong("start"); val end=selected.getLong("end")
+                    val frames=File(applicationContext.cacheDir,"highlight-frames-$id")
+                    try {
+                        val times=HighlightFrames.extract(source,start,end,frames) { progress(it,"SAMPLING SELECTED FRAMES...") }
+                        // Consent and target may have changed while decoding. Recheck before upload.
+                        val current=app.settings.flow.first()
+                        require(current.remoteConsent && current.backend==prefs.backend) { "Remote processing settings changed. Confirm again before uploading." }
+                        client.highlights(recipe.getString("highlight_prompt"),end-start,minOf(recipe.optLong("highlight_clip_ms",6000),end-start),times,times.indices.map { File(frames,"${it.toString().padStart(4,'0')}.jpg") },output) { value,message -> progress(value,message) }
+                        SemanticHighlights.parse(output.readText(),end-start)
+                    } finally { frames.deleteRecursively() }
                 }
                 "transcribe" -> {
                     val prefs=app.settings.flow.first()

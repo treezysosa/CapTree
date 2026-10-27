@@ -82,4 +82,24 @@ class BackendClientTest {
         } finally { server.shutdown(); input.delete(); output.delete() }
     }
     @Test(expected=IllegalArgumentException::class) fun credentialsInBackendUrlAreRejected() { BackendClient("https://name:secret@example.com","") }
+    @Test fun semanticHighlightsSendOnlyThumbnailsRelativeTimesAndDescription():Unit=runBlocking {
+        val (server,http)=server(); val frame=File.createTempFile("PRIVATE-VIDEO-LOCATION",".jpg"); val output=File.createTempFile("retro-highlights",".json")
+        try {
+            frame.writeBytes(byteArrayOf(1,2,3)); server.enqueue(health("semantic-highlights")); server.enqueue(MockResponse().setBody("{\"id\":\"visual\"}")); server.enqueue(MockResponse().setBody("{\"status\":\"completed\"}"))
+            server.enqueue(MockResponse().setHeader("Content-Type","application/json").setBody("{\"ranges\":[]}")); server.enqueue(MockResponse().setBody("{}"))
+            BackendClient(server.url("/").toString(),"test-token",http).highlights("a guitar",2000,1000,listOf(500),listOf(frame),output) { _,_-> }
+            server.takeRequest(); val request=server.takeRequest(); val body=request.body.readUtf8()
+            assertEquals("/v1/highlights",request.path); assertTrue(body.contains("a guitar")); assertTrue(body.contains("timestamps_ms")); assertTrue(body.contains("filename=\"0000.jpg\"")); assertTrue(body.contains("image/jpeg"))
+            assertFalse(body.contains(frame.name)); assertFalse(body.contains(frame.path)); assertFalse(body.contains("audio")); assertFalse(body.contains("inputs")); assertFalse(body.contains("backend"))
+            server.takeRequest(); server.takeRequest(); assertEquals("/v1/jobs/visual/purge",server.takeRequest().path)
+        } finally { server.shutdown(); frame.delete(); output.delete() }
+    }
+    @Test fun unsupportedHighlightsNeverUploadPrivateFrames():Unit=runBlocking {
+        val (server,http)=server(); val frame=File.createTempFile("retro-frame",".jpg"); val output=File.createTempFile("retro-highlights",".json").apply { delete() }
+        try {
+            frame.writeBytes(byteArrayOf(1)); server.enqueue(health("semantic-highlights",false))
+            try { BackendClient(server.url("/").toString(),"",http).highlights("a guitar",2000,1000,listOf(500),listOf(frame),output) { _,_-> }; fail("Must reject before uploading") } catch(expected:IllegalArgumentException) { assertTrue(expected.message!!.contains("Unsupported")) }
+            assertEquals(1,server.requestCount); assertFalse(output.exists())
+        } finally { server.shutdown(); frame.delete(); output.delete() }
+    }
 }

@@ -7,6 +7,7 @@ from .inference import GenerationCancelled
 
 MODEL_ID = "openai/clip-vit-base-patch32"
 MODEL_REVISION = "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+WEIGHTS_SHA256 = "a63082132ba4f97a80bea76823f544493bffa8082296d62d71581a4feff1576f"
 
 
 def rank_ranges(times, scores, duration_ms, clip_ms):

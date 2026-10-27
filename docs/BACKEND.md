@@ -2,7 +2,7 @@
 
 Local photo/video/GIF editing needs no server. Generation uses real Diffusers pipelines on your own machine. Software has no app fees; GPU hardware, storage, electricity, or rented hosting may cost money.
 
-Version 0.6 optionally adds [GFPGAN face restoration on CPU](FACE_RESTORATION.md). Install its separate packages and verified weights to enable the `face-restoration` capability. It does not require Diffusers or CUDA. Existing generation/transcription endpoints and API v2 remain compatible.
+Version 0.7 adds [CLIP visual highlights on CPU](HIGHLIGHTS.md), with a separate local-model installation and frame-upload consent. Version 0.6 optionally adds [GFPGAN face restoration on CPU](FACE_RESTORATION.md). Install its separate packages and verified weights to enable the `face-restoration` capability. It does not require Diffusers or CUDA. Existing generation/transcription endpoints and API v2 remain compatible.
 
 ## Install
 

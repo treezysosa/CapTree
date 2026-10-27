@@ -20,3 +20,5 @@ app/src/androidTest/assets/validation/
 face-models/
 .venv-face/
 *.retro.zip
+clip-model/
+.venv-highlights/

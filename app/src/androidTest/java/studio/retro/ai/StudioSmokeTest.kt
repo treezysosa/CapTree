@@ -24,6 +24,24 @@ import org.junit.Assert.*
 @RunWith(AndroidJUnit4::class)
 class StudioSmokeTest {
     @get:Rule val compose=createAndroidComposeRule<MainActivity>()
+    @Test fun visualHighlightsRequireExplicitFrameConsentAndCancellationStartsNoJob() {
+        val app:StudioApplication=ApplicationProvider.getApplicationContext(); val previous=runBlocking { app.settings.flow.first() }
+        val file=File(app.cacheDir,"ui-highlight-consent-${UUID.randomUUID()}.mp4")
+        InstrumentationRegistry.getInstrumentation().context.assets.open("fixture.mp4").use { source -> file.outputStream().use { source.copyTo(it) } }
+        lateinit var vm:StudioViewModel; var cleanup:StudioViewModel?=null
+        try {
+            runBlocking { app.settings.backend("https://visual-consent.invalid"); app.settings.consent(true) }
+            compose.runOnIdle {
+                vm=ViewModelProvider(compose.activity)[StudioViewModel::class.java]; cleanup=vm; vm.open("clipper")
+                vm.editor.value=vm.editor.value.copy(inputs=listOf(file.path),video=true,start="0",end="2.4",clips=listOf(ClipEdit(file.path,0,2400,2400)),highlightPrompt="a colorful scene")
+            }
+            compose.waitUntil(10000) { vm.prefs.value.remoteConsent && vm.prefs.value.backend=="https://visual-consent.invalid" }
+            compose.onNodeWithText("AI VISUAL HIGHLIGHTS · SERVER").performScrollTo().performClick()
+            compose.onNodeWithText("SEND SELECTED FRAMES?").assertExists(); compose.onNodeWithText("SEND FRAMES").assertExists()
+            compose.onNodeWithText("CANCEL").performClick()
+            compose.runOnIdle { assertNull(vm.active.value); assertNull(vm.highlightConfirmation.value); assertEquals("editor",vm.screen.value) }
+        } finally { compose.runOnIdle { cleanup?.back() }; file.delete(); runBlocking { app.settings.backend(previous.backend); app.settings.consent(previous.remoteConsent) } }
+    }
     @Test fun faceRestorationAsksBeforeUploadFromBothTouchAndActionButton() {
         val app:StudioApplication=ApplicationProvider.getApplicationContext(); val previous=runBlocking { app.settings.flow.first() }
         val photo=File(app.cacheDir,"face-consent-${UUID.randomUUID()}.png")

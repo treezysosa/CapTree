@@ -93,6 +93,20 @@ class ProjectArchiveTest {
             try { ProjectArchive.write(Project("id","bad","photo",recipe.toString()),root,ByteArrayOutputStream()); fail("Private settings must not be exported") } catch(expected:IllegalArgumentException) { assertTrue(expected.message!!.contains("private media")) }
         } finally { root.deleteRecursively() }
     }
+    @Test fun highlightResultBackupsRetainTheReportAndResetFrameConsent():Unit=runBlocking {
+        val original=root(); val target=root()
+        try {
+            val base=source(original)
+            val report=File(original,"outputs/highlights.json").apply { writeText("{\"ranges\":[]}") }
+            val recipe=JSONObject(base.recipe).put("highlight_prompt","a guitar").put("highlight_clip_ms",6000).put("highlight_index",0).put("highlight_upload_confirmed",true)
+            val project=base.copy(tool="highlights",recipe=recipe.toString(),output=report.path,mime="application/json")
+            val backup=ByteArrayOutputStream(); ProjectArchive.write(project,original,backup)
+            val restored=ProjectArchive.restore(backup.toByteArray().inputStream(),target) {}
+            assertEquals("highlights",restored.tool); assertEquals("application/json",restored.mime); assertEquals(report.readText(),File(restored.output).readText()); assertEquals("json",File(restored.output).extension)
+            val settings=JSONObject(restored.recipe)
+            assertEquals("a guitar",settings.getString("highlight_prompt")); assertFalse(settings.has("highlight_upload_confirmed")); assertFalse(settings.getBoolean("consent"))
+        } finally { original.deleteRecursively(); target.deleteRecursively() }
+    }
     @Test fun interruptedImportCleanupSelectsOnlyOwnedUuidFolders() {
         val root=root()
         try {

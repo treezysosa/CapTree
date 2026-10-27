@@ -33,7 +33,9 @@ data class EditorState(
     val suggestedClips:List<SuggestedClip> = emptyList(),
     val gifPalette:String="Adaptive 256", val gifDither:Boolean=false,
     val captionSourceClips:List<ClipEdit> = emptyList(), val captionSourceCues:List<CaptionCue> = emptyList(),
-    val faceRestore:Boolean=false, val faceStrength:Float=0.7f
+    val faceRestore:Boolean=false, val faceStrength:Float=0.7f,
+    val highlightPrompt:String="", val highlightSeconds:Int=6,
+    val semanticClips:List<SemanticRange> = emptyList(), val semanticSampleCount:Int=0
 ) {
     fun recipe(prefs:Preferences):JSONObject = JSONObject().apply {
         put("tool",tool); put("inputs",JSONArray(inputs)); put("video",video)
@@ -48,6 +50,7 @@ data class EditorState(
         put("stabilize",stabilize)
         put("gif_palette",gifPalette); put("gif_dither",gifDither)
         put("face_restore",faceRestore); put("face_strength",faceStrength.toDouble())
+        put("highlight_prompt",highlightPrompt); put("highlight_clip_ms",highlightSeconds*1000)
         put("caption_source_clips",JSONArray().apply { captionSourceClips.forEach { clip -> put(JSONObject().apply { put("path",clip.path); put("start",clip.startMs); put("end",clip.endMs); put("duration",clip.sourceDurationMs); put("id",clip.id); put("origin",clip.originId) }) } })
         put("caption_source_cues",JSONArray().apply { captionSourceCues.forEach { cue -> put(JSONObject().apply { put("start",cue.startMs); put("end",cue.endMs); put("text",cue.text) }) } })
     }
@@ -62,10 +65,12 @@ data class EditorState(
             val sourceCues=if(sourceArray==null)emptyList() else List(sourceArray.length()) { i -> val cue=sourceArray.getJSONObject(i); CaptionCue(cue.getLong("start"),cue.getLong("end"),cue.getString("text")) }
             val selected=r.optInt("selected_clip",0).coerceIn(0,clips.lastIndex.coerceAtLeast(0))
             val chosen=clips.getOrNull(selected)
-            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues,faceRestore=r.optBoolean("face_restore"),faceStrength=r.optDouble("face_strength",0.7).toFloat())
+            return EditorState(tool,List(a.length()){a.getString(it)},r.optBoolean("video"),"${(chosen?.startMs ?: r.optLong("start"))/1000.0}","${(chosen?.endMs ?: r.optLong("end",3000))/1000.0}",r.optInt("fps",8),r.optDouble("speed",1.0).toFloat(),r.optInt("width",320),r.optBoolean("loop",true),r.optString("caption"),r.optString("sticker"),r.optString("format","GIF"),r.optInt("scale",2),r.optDouble("intensity",0.7).toFloat(),r.optBoolean("denoise",true),r.optBoolean("sharpen",true),r.optString("prompt"),r.optString("negative"),r.optString("style","Cinematic"),r.optString("aspect","1:1"),r.optLong("seed",-1).let { if(it<0)"" else "$it" },r.optInt("duration",3),r.optDouble("motion",0.5).toFloat(),r.optString("captions"),clips=clips,selectedClip=selected,playheadMs=chosen?.startMs ?: 0,transcriptionLanguage=r.optString("transcription_language","auto"),stabilize=r.optBoolean("stabilize"),gifPalette=r.optString("gif_palette","Classic 256"),gifDither=r.optBoolean("gif_dither"),captionSourceClips=sourceClips,captionSourceCues=sourceCues,faceRestore=r.optBoolean("face_restore"),faceStrength=r.optDouble("face_strength",0.7).toFloat(),highlightPrompt=r.optString("highlight_prompt"),highlightSeconds=(r.optLong("highlight_clip_ms",6000)/1000).toInt().coerceIn(1,15))
         }
     }
 }
+data class HighlightConfirmation(val state:EditorState,val backend:String)
+
 class StudioViewModel(application:Application):AndroidViewModel(application) {
     private val app=application as StudioApplication
     private val dao=app.database.projects()
@@ -80,6 +85,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     val busyPercent=MutableStateFlow<Int?>(null)
     val transferActive=MutableStateFlow(false)
     val faceConfirmation=MutableStateFlow(false)
+    val highlightConfirmation=MutableStateFlow<HighlightConfirmation?>(null)
     private var transferJob:Job?=null
     private var transferCommitted=false
     val modelReport=MutableStateFlow("")
@@ -89,10 +95,10 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     private val history=EditHistory<EditorState>()
     val canUndo=MutableStateFlow(false); val canRedo=MutableStateFlow(false)
     private fun updateHistory() { canUndo.value=history.canUndo; canRedo.value=history.canRedo }
-    private fun clearHistory() { history.clear(); updateHistory(); faceConfirmation.value=false }
-    private fun snapshot(e:EditorState)=e.copy(playheadMs=0,previewRequestMs=null,suggestions=emptyList(),suggestedClips=emptyList())
+    private fun clearHistory() { history.clear(); updateHistory(); faceConfirmation.value=false; highlightConfirmation.value=null }
+    private fun snapshot(e:EditorState)=e.copy(playheadMs=0,previewRequestMs=null,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0)
     fun open(tool:String) { clearHistory(); editor.value=EditorState(tool=tool,style=if(tool=="photo")"Photorealistic" else "Cinematic",aspect=if(tool=="clipper")"Original" else "1:1"); screen.value="editor" }
-    fun back() { faceConfirmation.value=false; screen.value="home" }
+    fun back() { faceConfirmation.value=false; highlightConfirmation.value=null; screen.value="home" }
     private fun trim(e:EditorState):ClipEdit? {
         val clip=e.clips.getOrNull(e.selectedClip) ?: return null
         val start=e.start.toDoubleOrNull()?.takeIf { it.isFinite() && it>=0 && it<=clip.sourceDurationMs/1000.0 } ?: return null
@@ -102,6 +108,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun edit(group:String?=null,change:(EditorState)->EditorState) {
         try {
             val old=editor.value; var next=change(old)
+            if(next.highlightPrompt!=old.highlightPrompt || next.highlightSeconds!=old.highlightSeconds)next=next.copy(semanticClips=emptyList(),semanticSampleCount=0)
             if(next.captions!=old.captions)next=next.copy(captionSourceClips=emptyList(),captionSourceCues=emptyList())
             if(next.tool=="clipper" && next.clips==old.clips && next.selectedClip==old.selectedClip && (next.start!=old.start || next.end!=old.end)) {
                 trim(next)?.let { edited -> next=next.copy(clips=next.clips.mapIndexed { i,c -> if(i==next.selectedClip)edited else c }) }
@@ -112,7 +119,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
                     val cues=if(old.captionSourceClips.isNotEmpty())old.captionSourceCues else CaptionTrack.parse(old.captions,old.clips.sumOf { it.durationMs }.coerceAtLeast(1))
                     next=next.copy(captions=CaptionTrack.srt(CaptionTimeline.retime(cues,source,next.clips)),captionSourceClips=source,captionSourceCues=cues)
                 }
-                next=next.copy(suggestions=emptyList(),suggestedClips=emptyList())
+                next=next.copy(suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0)
             }
             history.record(snapshot(old),snapshot(next),group,android.os.SystemClock.uptimeMillis())
             editor.value=next; updateHistory()
@@ -120,7 +127,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     private fun restoreHistory(state:EditorState) {
         val index=state.selectedClip.coerceIn(0,state.clips.lastIndex.coerceAtLeast(0)); val clip=state.clips.getOrNull(index)
-        editor.value=state.copy(selectedClip=index,playheadMs=clip?.startMs ?: 0,previewRequestMs=clip?.startMs,suggestions=emptyList(),suggestedClips=emptyList()); updateHistory()
+        editor.value=state.copy(selectedClip=index,playheadMs=clip?.startMs ?: 0,previewRequestMs=clip?.startMs,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0); updateHistory()
     }
     fun undo() { if(!importing.value)history.undo(snapshot(editor.value))?.let(::restoreHistory) }
     fun redo() { if(!importing.value)history.redo(snapshot(editor.value))?.let(::restoreHistory) }
@@ -194,8 +201,9 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun cancel(project:Project) = launch { work.cancelUniqueWork(project.id); dao.status(project.id,"cancelled") }
     fun resume(project:Project) = launch {
+        if(project.tool=="highlights" && project.status=="completed") { applyHighlights(project); return@launch }
         if(project.tool=="transcribe" && project.status=="completed") { applyTranscript(project); return@launch }
-        var state=EditorState.restore(if(project.tool=="transcribe")"clipper" else project.tool,project.recipe)
+        var state=EditorState.restore(if(project.tool in setOf("transcribe","highlights"))"clipper" else project.tool,project.recipe)
         if(state.tool=="clipper" && state.clips.isEmpty() && state.inputs.isNotEmpty()) {
             val restored=state
             val clips=withContext(Dispatchers.IO) { restored.inputs.mapIndexed { index,path -> val d=VideoEngine.duration(File(path)); ClipEdit(path,if(index==0)((restored.start.toDoubleOrNull() ?: 0.0)*1000).toLong() else 0,if(index==0)((restored.end.toDoubleOrNull() ?: d/1000.0)*1000).toLong() else d,d) } }
@@ -204,6 +212,9 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
         clearHistory(); editor.value=state; screen.value="editor"
     }
     fun retry(project:Project) = launch {
+        if(project.tool=="highlights") {
+            clearHistory(); editor.value=EditorState.restore("clipper",project.recipe); screen.value="editor"; semanticHighlights(); return@launch
+        }
         if(JSONObject(project.recipe).let { it.optBoolean("face_restore") && !it.optBoolean("video") } && project.tool in setOf("enhance","upscale")) {
             clearHistory(); editor.value=EditorState.restore(project.tool,project.recipe); screen.value="editor"; faceConfirmation.value=true
         } else enqueue(project.copy(id=UUID.randomUUID().toString(),created=System.currentTimeMillis(),output=""))
@@ -275,7 +286,7 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     fun selectClip(index:Int) {
         val e=editor.value; val clip=e.clips.getOrNull(index) ?: return
         history.endGroup()
-        editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList(),suggestedClips=emptyList())
+        editor.value=e.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,previewRequestMs=clip.startMs,suggestions=emptyList(),suggestedClips=emptyList(),semanticClips=emptyList(),semanticSampleCount=0)
     }
     fun moveClip(direction:Int) {
         val e=editor.value; if(e.clips.isEmpty())return
@@ -340,6 +351,40 @@ class StudioViewModel(application:Application):AndroidViewModel(application) {
     }
     fun useSuggestion(suggestion:SuggestedClip) {
         edit { it.copy(start="${suggestion.startMs/1000.0}",end="${suggestion.endMs/1000.0}",playheadMs=suggestion.startMs,previewRequestMs=suggestion.startMs,suggestedClips=emptyList()) }
+    }
+    fun semanticHighlights(confirmed:Boolean=false) = launch {
+        require(!importing.value) { "Wait for current processing to finish." }
+        val pending=if(confirmed)highlightConfirmation.value ?: error("Review and confirm selected-frame upload first.") else HighlightConfirmation(editor.value,prefs.value.backend)
+        val e=pending.state
+        require(e.tool=="clipper")
+        val clip=e.clips.getOrNull(e.selectedClip)?.validated() ?: error("Select a video clip first.")
+        require(trim(e)==clip) { "Finish valid start/end times before requesting highlights." }
+        SemanticHighlights.sampleTimes(clip.durationMs)
+        require(e.highlightPrompt.isNotBlank() && e.highlightPrompt.length<=300) { "Describe what to find using 1–300 characters." }
+        require(prefs.value.remoteConsent && prefs.value.backend.isNotBlank() && prefs.value.backend==pending.backend) { "Configure your backend and allow remote processing in Settings. Confirm again if the server changed." }
+        if(!confirmed) { highlightConfirmation.value=pending; return@launch }
+        highlightConfirmation.value=null
+        val recipe=e.recipe(prefs.value).put("highlight_index",e.selectedClip).put("highlight_upload_confirmed",true)
+        enqueue(Project(UUID.randomUUID().toString(),"VISUAL HIGHLIGHTS · CLIP ${e.selectedClip+1}","highlights",recipe.toString()))
+    }
+    fun applyHighlights(project:Project) = launch {
+        require(project.status=="completed" && project.mime=="application/json")
+        val recipe=JSONObject(project.recipe)
+        val state=EditorState.restore("clipper",project.recipe)
+        val index=recipe.getInt("highlight_index"); val clip=state.clips.getOrNull(index)?.validated() ?: error("Original clip is missing.")
+        val result=withContext(Dispatchers.IO) {
+            val file=File(project.output); require(file.length() in 1..65536) { "Invalid highlight result size." }
+            SemanticHighlights.parse(file.readText(),clip.durationMs)
+        }
+        clearHistory()
+        editor.value=state.copy(selectedClip=index,start="${clip.startMs/1000.0}",end="${clip.endMs/1000.0}",playheadMs=clip.startMs,semanticClips=result.ranges.map { it.copy(startMs=it.startMs+clip.startMs,endMs=it.endMs+clip.startMs) },semanticSampleCount=result.sampleCount)
+        screen.value="editor"
+        message.value="Visual matches loaded on the saved timeline snapshot. Preview a range before applying it. Cosine scores are relative similarity, not confidence."
+    }
+    fun useSemanticRange(range:SemanticRange) {
+        val e=editor.value; val clip=e.clips.getOrNull(e.selectedClip) ?: return
+        if(range !in e.semanticClips || range.startMs<clip.startMs || range.endMs>clip.endMs) { message.value="Re-run highlights for the current trim."; return }
+        edit { it.copy(start="${range.startMs/1000.0}",end="${range.endMs/1000.0}",playheadMs=range.startMs,previewRequestMs=range.startMs,semanticClips=emptyList(),semanticSampleCount=0) }
     }
     fun testModel() = launch {
         require(!importing.value && projects.value.none { it.status in setOf("queued","processing") }) { "Wait for current processing to finish." }
